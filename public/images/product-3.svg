@@ -1,0 +1,11 @@
+<svg width="900" height="900" viewBox="0 0 900 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="a" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(520 420) rotate(121) scale(500)">
+      <stop stop-color="#F8F3E8"/>
+      <stop offset="1" stop-color="#E8DCC3"/>
+    </radialGradient>
+  </defs>
+  <rect width="900" height="900" fill="url(#a)"/>
+  <circle cx="450" cy="440" r="220" fill="#FFF" fill-opacity="0.45"/>
+  <path d="M315 450C315 542 388 615 479 615C570 615 644 542 644 450C644 341 535 269 479 345C423 269 315 341 315 450Z" fill="#C9A85F"/>
+</svg>
