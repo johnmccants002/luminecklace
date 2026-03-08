@@ -77,7 +77,11 @@ export function NfcLandingClient({ tagId }: NfcLandingClientProps) {
         }
 
         if (!response.ok) {
-          setStatusMessage(payload.error ?? "Unable to resolve this necklace.");
+          const errorMessage =
+            "error" in payload && typeof payload.error === "string"
+              ? payload.error
+              : "Unable to resolve this necklace.";
+          setStatusMessage(errorMessage);
           setStatusTone("warn");
           return;
         }
