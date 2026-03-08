@@ -86,8 +86,14 @@ export function NfcLandingClient({ tagId }: NfcLandingClientProps) {
           return;
         }
 
+        const isClaimed =
+          "tag" in payload &&
+          typeof payload.tag === "object" &&
+          payload.tag !== null &&
+          payload.tag.isClaimed === true;
+
         setStatusMessage(
-          payload.tag?.isClaimed
+          isClaimed
             ? "Necklace detected. Sign in to continue."
             : "Necklace detected. Activate in the app."
         );
