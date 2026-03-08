@@ -31,7 +31,7 @@ export function HeroSection() {
     <section ref={sectionRef} className="relative isolate overflow-hidden">
       <motion.div className="absolute inset-0" style={{ y: imageY, scale: imageScale }}>
         <Image
-          src="/images/hero-lifestyle.svg"
+          src="/images/heroimage-v2.png"
           alt="Lifestyle image of a woman wearing the Lumi Necklace"
           fill
           priority
@@ -43,6 +43,7 @@ export function HeroSection() {
         animate={{ backgroundPosition: ["0% 0%, 100% 100%", "8% -4%, 94% 104%", "0% 0%, 100% 100%"] }}
         transition={{ duration: 16, repeat: Infinity, ease: "easeInOut" }}
       />
+      <div className="absolute inset-0 bg-[linear-gradient(100deg,rgba(20,8,10,0.82)_0%,rgba(20,8,10,0.64)_34%,rgba(20,8,10,0.26)_62%,rgba(20,8,10,0.14)_100%)]" />
       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(20,8,10,0.36),rgba(30,10,13,0.68))]" />
       <HeartField hearts={10} opacity={0.17} className="z-0" colorClassName="text-[#e8afbb]" />
       <div className="pointer-events-none absolute inset-0">
@@ -65,22 +66,19 @@ export function HeroSection() {
         ))}
       </div>
 
-      <div className="relative mx-auto flex min-h-[86vh] w-full max-w-6xl items-end px-4 pb-20 pt-24 sm:px-6 lg:px-8">
-        <FadeIn className="max-w-2xl text-[#f9f1ef]">
-          <p className="mb-4 text-xs uppercase tracking-[0.2em] text-[#d8bd93]">
-            NFC-enabled necklace
-          </p>
-          <h1 className="font-serif text-4xl leading-tight sm:text-5xl lg:text-6xl">
-            A heart necklace that speaks when you tap.
+      <div className="relative mx-auto flex min-h-[86vh] w-full max-w-6xl items-end px-4 pb-32 pt-24 sm:px-6 lg:px-8">
+        <FadeIn className="max-w-xl text-[#f9f1ef] [text-shadow:0_2px_18px_rgba(0,0,0,0.35)]">
+          <h1 className="font-serif text-5xl leading-[0.98] tracking-tight sm:text-6xl lg:text-7xl">
+            Tap Into Love
           </h1>
-          <p className="mt-6 max-w-xl text-base text-[#f0d9d6] sm:text-lg">
-            Tap with your phone to receive a message - love, motivation, or calm.
+          <p className="mt-6 max-w-lg text-lg leading-relaxed text-[#f4e2df] sm:text-xl sm:leading-[1.55] md:text-2xl md:leading-[1.5] lg:text-[2.15rem] lg:leading-[1.45]">
+            A necklace that holds something just for you.
           </p>
 
-          <div className="mt-8 flex flex-wrap gap-3">
+          <div className="mt-10 flex flex-wrap gap-3">
             <motion.a
               href="#purchase"
-              className="inline-flex h-11 items-center justify-center rounded-full bg-[#f9f1ef] px-6 text-sm font-medium text-[#2a1214] transition hover:bg-white"
+              className="inline-flex h-11 items-center justify-center rounded-full bg-[#f9f1ef] px-6 text-sm font-medium text-[#2a1214] shadow-[0_12px_28px_rgba(16,6,7,0.34)] transition hover:bg-white"
               whileHover={{ y: -2, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
@@ -88,7 +86,7 @@ export function HeroSection() {
             </motion.a>
             <motion.a
               href="#how-it-works"
-              className="inline-flex h-11 items-center justify-center rounded-full border border-[#f9f1ef]/55 px-6 text-sm text-[#f9f1ef] transition hover:bg-[#f9f1ef]/10"
+              className="inline-flex h-11 items-center justify-center rounded-full border border-[#f9f1ef]/55 bg-[#2f1719]/35 px-6 text-sm text-[#f9f1ef] backdrop-blur-[1px] transition hover:bg-[#f9f1ef]/12"
               whileHover={{ y: -2, scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
@@ -96,7 +94,7 @@ export function HeroSection() {
             </motion.a>
           </div>
 
-          <div className="mt-8 flex flex-wrap gap-2 text-xs text-[#f3dddd] sm:gap-3 sm:text-sm">
+          <div className="mt-8 flex flex-wrap gap-2 text-xs text-[#f2dfdc] sm:gap-3 sm:text-sm">
             {TRUST_ITEMS.map((item, index) => (
               <span key={item}>
                 {item}

@@ -20,10 +20,10 @@ export const PRODUCT: Product = {
   finishes: ["Gold", "Silver"],
   chainLengths: ["16\"", "18\""],
   images: [
-    { src: "/images/product-1.svg", alt: "Lumi necklace front view" },
-    { src: "/images/product-2.svg", alt: "Lumi necklace on cream backdrop" },
-    { src: "/images/product-3.svg", alt: "Lumi necklace pendant close-up" },
-    { src: "/images/product-4.svg", alt: "Lumi necklace gift box and chain" },
+    { src: "/images/image1.png", alt: "Lumi necklace front view" },
+    { src: "/images/image2.png", alt: "Lumi necklace on cream backdrop" },
+    { src: "/images/image3.png", alt: "Lumi necklace pendant close-up" },
+    { src: "/images/image4.png", alt: "Lumi necklace gift box and chain" },
   ],
 };
 
