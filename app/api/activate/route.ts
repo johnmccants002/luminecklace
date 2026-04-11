@@ -1,25 +1,26 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
-import { requireUser } from "@/lib/auth/requireUser";
+import { createClaimToken, hashClaimToken } from "@/lib/activation/claimToken";
+import { getSupabaseConnectionErrorMessage } from "@/lib/supabase/env";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-type TagRow = {
+type ActivateBody = {
+  activationCode?: unknown;
+};
+
+type ReserveResultRow = {
+  result?: string | null;
   tag_id?: string | null;
   sku?: string | null;
-};
-
-type NecklaceSkuRow = {
-  sku?: string | null;
-  name?: string | null;
+  necklace_name?: string | null;
   base_package_ids?: unknown;
+  reserved_until?: string | null;
 };
 
-type UserSettingsRow = {
-  enabled_package_ids?: unknown;
-  equipped_tag_id?: string | null;
-};
+const ACTIVATION_SESSION_COOKIE = "lumi_activation_session";
+const ACTIVATION_SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 function normalizePackageIds(value: unknown): string[] {
   if (!Array.isArray(value)) {
@@ -29,21 +30,78 @@ function normalizePackageIds(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string");
 }
 
+function parseCookieValue(req: Request, cookieName: string): string | null {
+  const header = req.headers.get("cookie");
+  if (!header) {
+    return null;
+  }
+
+  const cookieParts = header.split(";");
+  for (const part of cookieParts) {
+    const [rawName, ...rawValue] = part.trim().split("=");
+    if (rawName !== cookieName) {
+      continue;
+    }
+
+    const value = rawValue.join("=").trim();
+    return value.length > 0 ? decodeURIComponent(value) : null;
+  }
+
+  return null;
+}
+
+function buildActivationCodeHash(activationCode: string): string {
+  return createHash("sha256").update(activationCode).digest("hex");
+}
+
+function reservationErrorStatus(result: string | null | undefined): number {
+  if (result === "not_found") {
+    return 404;
+  }
+
+  if (result === "reservation_expired") {
+    return 410;
+  }
+
+  if (result === "already_claimed") {
+    return 409;
+  }
+
+  return 500;
+}
+
+function reservationErrorMessage(result: string | null | undefined): string {
+  if (result === "not_found") {
+    return "Activation code not found";
+  }
+
+  if (result === "reservation_expired") {
+    return "Reservation expired";
+  }
+
+  if (result === "already_claimed") {
+    return "Activation code has already been claimed";
+  }
+
+  if (result === "sku_not_found") {
+    return "Necklace sku not found for activated tag";
+  }
+
+  return "Failed to reserve activation code";
+}
+
 export async function POST(req: Request) {
   try {
-    const { user } = await requireUser(req);
+    let body: ActivateBody;
 
-    let body: unknown;
     try {
-      body = await req.json();
+      body = (await req.json()) as ActivateBody;
     } catch {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
     const rawActivationCode =
-      typeof body === "object" && body !== null && "activationCode" in body
-        ? (body as { activationCode?: unknown }).activationCode
-        : undefined;
+      typeof body === "object" && body !== null ? body.activationCode : undefined;
 
     if (typeof rawActivationCode !== "string") {
       return NextResponse.json(
@@ -60,155 +118,81 @@ export async function POST(req: Request) {
       );
     }
 
-    const activationCodeHash = createHash("sha256")
-      .update(activationCode)
-      .digest("hex");
+    const claimToken = createClaimToken();
+    const claimTokenHash = hashClaimToken(claimToken.token);
+    const activationCodeHash = buildActivationCodeHash(activationCode);
 
-    const { data: tag, error: tagLookupError } = await supabaseAdmin
-      .from("tags")
-      .select("tag_id, sku")
-      .eq("activation_code_hash", activationCodeHash)
-      .eq("status", "unclaimed")
-      .maybeSingle<TagRow>();
+    const existingSessionId = parseCookieValue(req, ACTIVATION_SESSION_COOKIE);
+    const reservationSessionId = existingSessionId ?? randomUUID();
 
-    if (tagLookupError) {
-      console.error("Failed to query tag for activation", tagLookupError);
-      return NextResponse.json(
-        { error: "Failed to query activation code" },
-        { status: 500 }
-      );
-    }
-
-    if (!tag) {
-      return NextResponse.json(
-        { error: "Activation code not found" },
-        { status: 404 }
-      );
-    }
-
-    if (!tag.sku) {
-      return NextResponse.json(
-        { error: "Tag is missing required sku" },
-        { status: 500 }
-      );
-    }
-
-    let claimUpdate = supabaseAdmin
-      .from("tags")
-      .update({
-        status: "claimed",
-        owner_user_id: user.id,
-        claimed_at: new Date().toISOString(),
-      })
-      .eq("status", "unclaimed");
-
-    if (tag.tag_id) {
-      claimUpdate = claimUpdate.eq("tag_id", tag.tag_id);
-    } else {
-      claimUpdate = claimUpdate.eq("activation_code_hash", activationCodeHash);
-    }
-
-    const { data: claimedTag, error: claimError } = await claimUpdate
-      .select("tag_id, sku")
-      .maybeSingle<TagRow>();
-
-    if (claimError) {
-      console.error("Failed to claim tag", claimError);
-      return NextResponse.json({ error: "Failed to claim tag" }, { status: 500 });
-    }
-
-    if (!claimedTag) {
-      return NextResponse.json(
-        { error: "Tag is no longer available for claiming" },
-        { status: 409 }
-      );
-    }
-
-    const { data: necklaceSku, error: necklaceSkuError } = await supabaseAdmin
-      .from("necklace_skus")
-      .select("sku, name, base_package_ids")
-      .eq("sku", tag.sku)
-      .maybeSingle<NecklaceSkuRow>();
-
-    if (necklaceSkuError) {
-      console.error("Failed to fetch necklace sku", necklaceSkuError);
-      return NextResponse.json(
-        { error: "Failed to fetch necklace sku" },
-        { status: 500 }
-      );
-    }
-
-    if (!necklaceSku) {
-      return NextResponse.json(
-        { error: "Necklace sku not found for activated tag" },
-        { status: 404 }
-      );
-    }
-
-    const basePackageIDs = normalizePackageIds(necklaceSku.base_package_ids);
-
-    const { data: existingSettings, error: settingsLookupError } =
-      await supabaseAdmin
-        .from("user_settings")
-        .select("enabled_package_ids, equipped_tag_id")
-        .eq("user_id", user.id)
-        .maybeSingle<UserSettingsRow>();
-
-    if (settingsLookupError) {
-      console.error("Failed to fetch user settings", settingsLookupError);
-      return NextResponse.json(
-        { error: "Failed to load user settings" },
-        { status: 500 }
-      );
-    }
-
-    const existingEnabledPackageIds = normalizePackageIds(
-      existingSettings?.enabled_package_ids
+    const { data: reserveRows, error: reserveError } = await supabaseAdmin.rpc(
+      "reserve_activation_code",
+      {
+        p_activation_code_hash: activationCodeHash,
+        p_claim_token_hash: claimTokenHash,
+        p_reserved_until: claimToken.expiresAt,
+        p_reserved_by_session: reservationSessionId,
+      }
     );
-    const mergedEnabledPackageIds =
-      existingEnabledPackageIds.length === 0
-        ? basePackageIDs
-        : Array.from(new Set([...existingEnabledPackageIds, ...basePackageIDs]));
 
-    const resolvedTagId = claimedTag.tag_id ?? "";
-    if (!resolvedTagId) {
+    if (reserveError) {
+      console.error("Failed to reserve activation code", reserveError);
+      const errorMessage = getSupabaseConnectionErrorMessage(reserveError);
       return NextResponse.json(
-        { error: "Claimed tag missing identifier" },
+        { error: errorMessage ?? "Failed to reserve activation code" },
         { status: 500 }
       );
     }
 
-    const { error: settingsUpsertError } = await supabaseAdmin
-      .from("user_settings")
-      .upsert(
-        {
-          user_id: user.id,
-          enabled_package_ids: mergedEnabledPackageIds,
-          equipped_tag_id: existingSettings?.equipped_tag_id ?? resolvedTagId,
-        },
-        { onConflict: "user_id" }
-      );
+    const reserveResult = Array.isArray(reserveRows)
+      ? (reserveRows[0] as ReserveResultRow | undefined)
+      : undefined;
 
-    if (settingsUpsertError) {
-      console.error("Failed to upsert user settings", settingsUpsertError);
+    if (!reserveResult || reserveResult.result !== "reserved") {
       return NextResponse.json(
-        { error: "Failed to save user settings" },
+        { error: reservationErrorMessage(reserveResult?.result) },
+        { status: reservationErrorStatus(reserveResult?.result) }
+      );
+    }
+
+    if (!reserveResult.tag_id || !reserveResult.sku) {
+      return NextResponse.json(
+        { error: "Reserved activation is missing tag metadata" },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({
+    const basePackageIDs = normalizePackageIds(reserveResult.base_package_ids);
+
+    const response = NextResponse.json({
       success: true,
-      tagId: resolvedTagId,
-      sku: claimedTag.sku ?? tag.sku,
-      necklaceName: necklaceSku.name ?? tag.sku,
-      basePackageIDs,
+      activation: {
+        tagId: reserveResult.tag_id,
+        sku: reserveResult.sku,
+        necklaceName: reserveResult.necklace_name ?? reserveResult.sku,
+        basePackageIDs,
+      },
+      claim: {
+        status: "reserved",
+        reservedUntil: reserveResult.reserved_until ?? claimToken.expiresAt,
+        claimToken: claimToken.token,
+      },
     });
-  } catch (error) {
-    if (error instanceof Response) {
-      return error;
+
+    if (!existingSessionId) {
+      response.cookies.set({
+        name: ACTIVATION_SESSION_COOKIE,
+        value: reservationSessionId,
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: ACTIVATION_SESSION_COOKIE_MAX_AGE_SECONDS,
+      });
     }
 
+    return response;
+  } catch (error) {
     console.error("Unhandled activation error", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

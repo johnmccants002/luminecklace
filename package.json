@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "seed": "node --loader ts-node/esm scripts/seed.ts"
+    "seed": "node --loader ts-node/esm scripts/seed.ts",
+    "test:ios-contract": "node --test tests/ios-contract.integration.test.mjs",
+    "test:app-clip-activation": "node --test tests/ios-contract.integration.test.mjs"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.12",
