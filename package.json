@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "seed": "node --loader ts-node/esm scripts/seed.ts",
+    "seed": "node --import tsx scripts/seed.ts",
     "test:ios-contract": "node --test tests/ios-contract.integration.test.mjs",
     "test:app-clip-activation": "node --test tests/ios-contract.integration.test.mjs"
   },
@@ -35,7 +35,9 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "server-only": "^0.0.1",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }
