@@ -1,0 +1,16 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["7HTV4A5W6Y.luminecklace.luminecklace"],
+        "components": [
+          { "/": "/clip*" },
+          { "/": "/handoff*" }
+        ]
+      }
+    ]
+  },
+  "appclips": {
+    "apps": ["7HTV4A5W6Y.luminecklace.luminecklace.Clip"]
+  }
+}
