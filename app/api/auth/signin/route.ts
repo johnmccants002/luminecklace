@@ -7,12 +7,6 @@ type AuthBody = {
   password?: unknown;
 };
 
-function getStatusCode(status: unknown, fallback: number) {
-  return typeof status === "number" && status >= 100 && status <= 599
-    ? status
-    : fallback;
-}
-
 export async function POST(req: Request) {
   try {
     let body: AuthBody;
@@ -40,22 +34,22 @@ export async function POST(req: Request) {
     });
 
     if (error) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: getStatusCode(error.status, 401) }
-      );
+      return NextResponse.json({ error: error.message }, { status: 401 });
     }
 
     if (!data.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    if (!data.session?.access_token) {
+    const hasValidSession =
+      typeof data.session?.access_token === "string" &&
+      typeof data.session?.refresh_token === "string" &&
+      typeof data.session?.expires_in === "number" &&
+      typeof data.session?.token_type === "string";
+
+    if (!hasValidSession || !data.session) {
       return NextResponse.json(
-        {
-          error:
-            "No access token returned from auth provider. Ensure the account can sign in (for example, email confirmation may be required).",
-        },
+        { error: "Unauthorized" },
         { status: 401 }
       );
     }
@@ -64,7 +58,7 @@ export async function POST(req: Request) {
       success: true,
       user: {
         id: data.user.id,
-        email: data.user.email,
+        email: data.user.email ?? "",
       },
       session: {
         accessToken: data.session.access_token,

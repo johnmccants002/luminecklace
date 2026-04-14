@@ -51,7 +51,7 @@ function pickRandom<T>(items: T[]): T | undefined {
 
 export async function GET(req: Request) {
   try {
-    const { user } = await requireUser(req);
+    const { user } = await requireUser(req, { bearerOnly: true });
 
     const { searchParams } = new URL(req.url);
     const requestedTagId = searchParams.get("tagId")?.trim();
@@ -85,7 +85,7 @@ export async function GET(req: Request) {
       }
 
       if (!requestedTag) {
-        return NextResponse.json({ error: "Tag not found" }, { status: 404 });
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
 
       if (requestedTag.owner_user_id !== user.id) {
@@ -98,6 +98,7 @@ export async function GET(req: Request) {
         .from("tags")
         .select("tag_id")
         .eq("owner_user_id", user.id)
+        .eq("status", "claimed")
         .order("claimed_at", { ascending: true, nullsFirst: false })
         .limit(1)
         .maybeSingle<TagRow>();
@@ -279,12 +280,12 @@ export async function GET(req: Request) {
         id: chosenMessage.id,
         text: chosenMessage.text,
         packageId: chosenMessage.package_id,
-        packageTitle: packageRow?.title ?? null,
+        packageTitle: packageRow?.title ?? chosenMessage.package_id,
       },
       experience: {
-        themeKey: necklaceSku.theme_key ?? null,
-        animationKey: necklaceSku.animation_key ?? null,
-        soundKey: necklaceSku.sound_key ?? null,
+        themeKey: necklaceSku.theme_key ?? "",
+        animationKey: necklaceSku.animation_key ?? "",
+        soundKey: necklaceSku.sound_key ?? "",
       },
     });
   } catch (error) {

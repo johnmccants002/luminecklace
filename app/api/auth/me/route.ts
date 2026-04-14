@@ -1,36 +1,22 @@
 import { NextResponse } from "next/server";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth/requireUser";
 
-function getStatusCode(status: unknown, fallback: number) {
-  return typeof status === "number" && status >= 100 && status <= 599
-    ? status
-    : fallback;
-}
-
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase.auth.getUser();
-
-    if (error) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: getStatusCode(error.status, 401) }
-      );
-    }
-
-    if (!data.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { user } = await requireUser(req, { bearerOnly: true });
 
     return NextResponse.json({
       user: {
-        id: data.user.id,
-        email: data.user.email,
+        id: user.id,
+        email: user.email ?? "",
       },
     });
   } catch (error) {
+    if (error instanceof Response) {
+      return error;
+    }
+
     console.error("Unhandled me error", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

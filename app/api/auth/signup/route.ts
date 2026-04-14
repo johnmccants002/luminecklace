@@ -46,24 +46,43 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({
+    const hasCompleteSession =
+      typeof data.session?.access_token === "string" &&
+      typeof data.session?.refresh_token === "string" &&
+      typeof data.session?.expires_in === "number" &&
+      typeof data.session?.token_type === "string";
+
+    const responseBody: {
+      success: true;
+      user: { id: string; email: string } | null;
+      needsEmailConfirmation: boolean;
+      session?: {
+        accessToken: string;
+        refreshToken: string;
+        expiresIn: number;
+        tokenType: string;
+      };
+    } = {
       success: true,
       user: data.user
         ? {
             id: data.user.id,
-            email: data.user.email,
+            email: data.user.email ?? "",
           }
         : null,
-      needsEmailConfirmation: !data.session,
-      session: data.session
-        ? {
-            accessToken: data.session.access_token,
-            refreshToken: data.session.refresh_token,
-            expiresIn: data.session.expires_in,
-            tokenType: data.session.token_type,
-          }
-        : null,
-    });
+      needsEmailConfirmation: !hasCompleteSession,
+    };
+
+    if (hasCompleteSession && data.session) {
+      responseBody.session = {
+        accessToken: data.session.access_token,
+        refreshToken: data.session.refresh_token,
+        expiresIn: data.session.expires_in,
+        tokenType: data.session.token_type,
+      };
+    }
+
+    return NextResponse.json(responseBody);
   } catch (error) {
     console.error("Unhandled signup error", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
