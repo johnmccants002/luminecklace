@@ -1,3 +1,5 @@
+// Legacy authenticated sender route retained for compatibility while the public
+// recipient flow moves to /api/tap/resolve and /api/tap/revealed.
 import { NextResponse } from "next/server";
 
 import { requireUser } from "@/lib/auth/requireUser";

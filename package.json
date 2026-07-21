@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "seed": "node --import tsx scripts/seed.ts",
-    "seed:dev-user": "node --import tsx scripts/seed-dev-user.ts"
+    "seed:dev-user": "node --import tsx scripts/seed-dev-user.ts",
+    "test:recipient-tap": "node --import tsx --test tests/recipient-tap.integration.test.ts",
+    "test:sender": "node --env-file=.env --import tsx --test tests/sender.integration.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.12",

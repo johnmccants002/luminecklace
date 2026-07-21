@@ -1,3 +1,5 @@
+// Legacy NFC compatibility route retained while the public recipient tap flow
+// migrates to /api/tap/resolve and /api/tap/revealed.
 import { NextResponse } from "next/server";
 
 import { supabaseAdmin } from "@/lib/supabase/admin";
