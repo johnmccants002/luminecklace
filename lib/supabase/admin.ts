@@ -10,4 +10,10 @@ const SUPABASE_SECRET_KEY_ENV = "SUPABASE_SECRET_KEY";
 const supabaseUrl = getRequiredSupabaseUrl(SUPABASE_URL_ENV);
 const supabaseSecretKey = getRequiredEnvVar(SUPABASE_SECRET_KEY_ENV);
 
-export const supabaseAdmin = createClient(supabaseUrl, supabaseSecretKey);
+export const supabaseAdmin = createClient(supabaseUrl, supabaseSecretKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false,
+    detectSessionInUrl: false,
+  },
+});
