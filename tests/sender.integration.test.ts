@@ -17,8 +17,11 @@ import { resolveNextRecipientTap } from "../lib/tap/recipient";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
+const SUPABASE_ANON_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
+if (!SUPABASE_URL || !SUPABASE_SECRET_KEY || !SUPABASE_ANON_KEY) {
   throw new Error("Missing Supabase environment variables for sender tests");
 }
 
@@ -31,6 +34,10 @@ type Fixture = {
   secondaryNecklaceId: string;
   otherNecklaceId: string;
   primaryTokenHash: string;
+  ownerEmail: string;
+  ownerPassword: string;
+  otherEmail: string;
+  otherPassword: string;
 };
 
 function fixtureEmail(prefix: string) {
@@ -161,6 +168,10 @@ async function createFixture(): Promise<Fixture> {
     secondaryNecklaceId: secondary.id,
     otherNecklaceId: other.id,
     primaryTokenHash,
+    ownerEmail,
+    ownerPassword,
+    otherEmail,
+    otherPassword,
   };
 }
 
@@ -206,6 +217,23 @@ test("sender necklace APIs scope ownership, order primary first, and enqueue saf
     );
     assert.deepEqual(necklaces[0].nextLumi, necklaces[0].queue[0]);
     assert.equal(necklaces[0].availableLumiCount, necklaces[0].queue.length);
+    assert.equal(necklaces[0].reserve.enabled, true);
+    assert.equal(necklaces[0].reserve.approvedCount, 18);
+    assert.equal(necklaces[0].reserve.totalCount, 18);
+    assert.deepEqual(
+      necklaces[0].reserve.categories.map((category) => [
+        category.key,
+        category.approvedCount,
+        category.totalCount,
+      ]),
+      [
+        ["affection", 4, 4],
+        ["comfort", 4, 4],
+        ["encouragement", 4, 4],
+        ["presence", 3, 3],
+        ["reassurance", 3, 3],
+      ]
+    );
     assert.deepEqual(
       necklaces[0].recentlyRevealed.map((lumi) => lumi.text),
       [
@@ -227,9 +255,39 @@ test("sender necklace APIs scope ownership, order primary first, and enqueue saf
       "nextLumi",
       "queue",
       "recentlyRevealed",
+      "reserve",
       "sku",
       "themeKey",
     ]);
+
+    const ownerClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const otherClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const [{ error: ownerSignInError }, { error: otherSignInError }] =
+      await Promise.all([
+        ownerClient.auth.signInWithPassword({
+          email: fixture.ownerEmail,
+          password: fixture.ownerPassword,
+        }),
+        otherClient.auth.signInWithPassword({
+          email: fixture.otherEmail,
+          password: fixture.otherPassword,
+        }),
+      ]);
+    assert.equal(ownerSignInError, null);
+    assert.equal(otherSignInError, null);
+
+    const [{ data: ownerReserve }, { data: otherReserve }] = await Promise.all([
+      ownerClient
+        .from("necklace_reserve_settings")
+        .select("necklace_id")
+        .eq("necklace_id", fixture.primaryNecklaceId),
+      otherClient
+        .from("necklace_reserve_settings")
+        .select("necklace_id")
+        .eq("necklace_id", fixture.primaryNecklaceId),
+    ]);
+    assert.equal(ownerReserve?.length, 1);
+    assert.equal(otherReserve?.length, 0);
 
     const [first, second] = await Promise.all([
       enqueueSenderLumi(admin, fixture.ownerId, fixture.secondaryNecklaceId, "One"),

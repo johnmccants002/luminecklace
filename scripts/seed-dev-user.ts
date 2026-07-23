@@ -339,7 +339,7 @@ async function upsertOwnerships(rows: OwnershipRow[]) {
 
 async function upsertLumis(rows: LumiRow[]) {
   const { error } = await supabaseAdmin.from("necklace_lumis").upsert(rows, {
-    onConflict: "necklace_id,queue_position",
+    onConflict: "id",
   });
 
   if (!error) {
@@ -352,6 +352,54 @@ async function upsertLumis(rows: LumiRow[]) {
   }
 
   throw new Error(`Failed to upsert necklace lumis: ${error.message}`);
+}
+
+async function initializeDemoReserve(necklaceIds: string[]) {
+  for (const necklaceId of necklaceIds) {
+    const { data, error } = await supabaseAdmin.rpc(
+      "initialize_necklace_lumi_reserve",
+      { p_necklace_id: necklaceId }
+    );
+
+    if (error) {
+      throw new Error(
+        `Failed to initialize Lumi Reserve for demo necklace ${necklaceId}: ${error.message}`
+      );
+    }
+    if (
+      !data ||
+      typeof data !== "object" ||
+      !("status" in data) ||
+      data.status !== "ok"
+    ) {
+      throw new Error(
+        `Lumi Reserve initializer returned an invalid result for demo necklace ${necklaceId}`
+      );
+    }
+  }
+
+  const { error: settingError } = await supabaseAdmin
+    .from("necklace_reserve_settings")
+    .update({ is_enabled: true })
+    .in("necklace_id", necklaceIds);
+
+  if (settingError) {
+    throw new Error(`Failed to enable demo Lumi Reserve: ${settingError.message}`);
+  }
+
+  const { count, error: countError } = await supabaseAdmin
+    .from("necklace_reserve_items")
+    .select("message_id", { count: "exact", head: true })
+    .in("necklace_id", necklaceIds)
+    .eq("is_approved", true);
+
+  if (countError) {
+    throw new Error(
+      `Failed to count approved demo Reserve Lumis: ${countError.message}`
+    );
+  }
+
+  return count ?? 0;
 }
 
 async function seedDemoGraph(userId: string) {
@@ -402,6 +450,10 @@ async function seedDemoGraph(userId: string) {
   ];
 
   await upsertNecklaces(necklaceRows);
+  const approvedReserveItemCount = await initializeDemoReserve([
+    DEMO_IDS.activeNecklaceId,
+    DEMO_IDS.pendingNecklaceId,
+  ]);
 
   await upsertOrderItems([
     {
@@ -524,7 +576,11 @@ async function seedDemoGraph(userId: string) {
 
   console.log("[seed-dev-user] Demo graph seeded:");
   console.log("  - linked necklaces: 2");
-  console.log("  - queued Lumis: 5");
+  console.log("  - personal queued Lumis: 5");
+  console.log("  - Lumi Reserve enabled: true (2 necklaces)");
+  console.log(
+    `  - approved Reserve Lumis: ${approvedReserveItemCount} total across demo necklaces`
+  );
 }
 
 async function main() {

@@ -1,4 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  listSenderReserveSummaries,
+  type SenderReserveSummary,
+} from "@/lib/sender/reserve";
 
 type OwnershipRow = {
   necklace_id: string;
@@ -71,6 +75,7 @@ export type SenderNecklace = {
   nextLumi: SenderLumi | null;
   queue: SenderLumi[];
   recentlyRevealed: RevealedLumi[];
+  reserve: SenderReserveSummary;
 };
 
 export class SenderApiError extends Error {
@@ -199,6 +204,7 @@ export async function listSenderNecklaces(
   const necklaces = (necklaceData ?? []) as NecklaceRow[];
   const lumis = (lumiData ?? []) as LumiRow[];
   const revealedLumis = (revealedData ?? []) as LumiRow[];
+  const reserveByNecklace = await listSenderReserveSummaries(client, necklaceIds);
   const ownershipByNecklace = new Map(
     ownerships.map((ownership) => [ownership.necklace_id, ownership])
   );
@@ -228,6 +234,12 @@ export async function listSenderNecklaces(
         nextLumi: queue[0] ?? null,
         queue,
         recentlyRevealed,
+        reserve: reserveByNecklace.get(necklace.id) ?? {
+          enabled: false,
+          approvedCount: 0,
+          totalCount: 0,
+          categories: [],
+        },
         claimedAt: ownership?.claimed_at ?? "",
       };
     })

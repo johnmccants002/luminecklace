@@ -45,7 +45,7 @@ function readDotEnvVars() {
         const value = line.slice(separatorIndex + 1).trim();
         return [key, value];
       })
-      .filter(Boolean);
+      .filter((entry): entry is [string, string] => Array.isArray(entry));
 
     return Object.fromEntries(entries);
   } catch {
@@ -120,16 +120,24 @@ async function callRevealed(revealSessionId: unknown) {
 }
 
 async function hasRecipientSchema(): Promise<boolean> {
-  const { error } = await admin.from("necklace_lumis").select("id").limit(1);
-  if (!error) {
+  const [{ error: lumiError }, { error: reserveError }] = await Promise.all([
+    admin.from("necklace_lumis").select("id").limit(1),
+    admin.from("necklace_reserve_items").select("message_id").limit(1),
+  ]);
+  if (!lumiError && !reserveError) {
     return true;
   }
 
-  if (isMissingSchemaError(error.message)) {
+  if (
+    (lumiError && isMissingSchemaError(lumiError.message)) ||
+    (reserveError && isMissingSchemaError(reserveError.message))
+  ) {
     return false;
   }
 
-  throw new Error(`Failed to inspect recipient schema: ${error.message}`);
+  throw new Error(
+    `Failed to inspect recipient schema: ${lumiError?.message ?? reserveError?.message}`
+  );
 }
 
 const recipientSchemaReadyPromise = hasRecipientSchema();
@@ -145,6 +153,7 @@ async function skipIfRecipientSchemaMissing() {
 
 async function createFixture(options: {
   lifecycleStatus?: "active" | "inactive";
+  reserveEnabled?: boolean;
   lumis?: Array<{
     queue_position: number;
     content: string;
@@ -201,6 +210,15 @@ async function createFixture(options: {
     throw new Error(`Failed to create fixture ownership: ${ownershipError.message}`);
   }
 
+  const { error: reserveSettingError } = await admin
+    .from("necklace_reserve_settings")
+    .update({ is_enabled: options.reserveEnabled ?? false })
+    .eq("necklace_id", necklace.id);
+
+  if (reserveSettingError) {
+    throw new Error(`Failed to configure fixture Reserve: ${reserveSettingError.message}`);
+  }
+
   if ((options.lumis ?? []).length > 0) {
     const { error: lumisError } = await admin.from("necklace_lumis").insert(
       (options.lumis ?? []).map((lumi) => ({
@@ -234,6 +252,8 @@ async function createFixture(options: {
 async function cleanupFixture(fixture: { userId: string; necklaceId: string }) {
   await admin.from("tap_events").delete().eq("necklace_id", fixture.necklaceId);
   await admin.from("lumi_reveal_sessions").delete().eq("necklace_id", fixture.necklaceId);
+  await admin.from("necklace_reserve_items").delete().eq("necklace_id", fixture.necklaceId);
+  await admin.from("necklace_reserve_settings").delete().eq("necklace_id", fixture.necklaceId);
   await admin.from("necklace_lumis").delete().eq("necklace_id", fixture.necklaceId);
   await admin.from("necklace_ownerships").delete().eq("necklace_id", fixture.necklaceId);
   await admin.from("necklaces").delete().eq("id", fixture.necklaceId);
@@ -312,6 +332,7 @@ test("resolve returns empty for an empty queue and for an ineligible first item"
 
   const emptyFixture = await createFixture({ lumis: [] });
   const futureFixture = await createFixture({
+    reserveEnabled: true,
     lumis: [
       {
         queue_position: 1,
@@ -462,6 +483,305 @@ test("concurrent confirmation cannot reveal twice", async () => {
     }
 
     assert.equal(events.length, 1);
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test("personal Lumis resolve before Reserve and Reserve rotates after personal is empty", async () => {
+  if (await skipIfRecipientSchemaMissing()) {
+    return;
+  }
+
+  const fixture = await createFixture({
+    reserveEnabled: true,
+    lumis: [
+      {
+        queue_position: 1,
+        content: "Personal always comes first.",
+      },
+      {
+        queue_position: 2,
+        content: "Second personal also comes before Reserve.",
+      },
+    ],
+  });
+
+  try {
+    const personalResolve = await callResolve(fixture.rawToken);
+    assertReadyResolve(personalResolve);
+    assert.equal(personalResolve.lumi.text, "Personal always comes first.");
+    await callRevealed(personalResolve.revealSessionId);
+
+    const secondPersonalResolve = await callResolve(fixture.rawToken);
+    assertReadyResolve(secondPersonalResolve);
+    assert.equal(
+      secondPersonalResolve.lumi.text,
+      "Second personal also comes before Reserve."
+    );
+    await callRevealed(secondPersonalResolve.revealSessionId);
+
+    const firstReserveResolve = await callResolve(fixture.rawToken);
+    assertReadyResolve(firstReserveResolve);
+    assert.notEqual(firstReserveResolve.lumi.id, personalResolve.lumi.id);
+    await callRevealed(firstReserveResolve.revealSessionId);
+
+    const secondReserveResolve = await callResolve(fixture.rawToken);
+    assertReadyResolve(secondReserveResolve);
+    assert.notEqual(secondReserveResolve.lumi.id, firstReserveResolve.lumi.id);
+    await callRevealed(secondReserveResolve.revealSessionId);
+
+    const { data: reserveReveals, error: reserveRevealError } = await admin
+      .from("necklace_reserve_items")
+      .select("message_id, reveal_count, last_revealed_at")
+      .eq("necklace_id", fixture.necklaceId)
+      .gt("reveal_count", 0);
+
+    if (reserveRevealError || !reserveReveals) {
+      throw new Error(
+        `Failed to read Reserve reveal history: ${reserveRevealError?.message ?? "unknown error"}`
+      );
+    }
+
+    assert.equal(reserveReveals.length, 2);
+    assert.ok(
+      reserveReveals.every(
+        (item) => item.reveal_count === 1 && typeof item.last_revealed_at === "string"
+      )
+    );
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test("Reserve catalog and necklace initialization are exact, complete, and idempotent", async () => {
+  if (await skipIfRecipientSchemaMissing()) {
+    return;
+  }
+
+  const { data: reserveMessages, error: messageError } = await admin
+    .from("messages")
+    .select("id, reserve_sort_order")
+    .eq("is_reserve_eligible", true)
+    .order("reserve_sort_order", { ascending: true });
+
+  if (messageError || !reserveMessages) {
+    throw new Error(
+      `Failed to load Reserve catalog: ${messageError?.message ?? "unknown error"}`
+    );
+  }
+
+  assert.equal(reserveMessages.length, 18);
+  assert.deepEqual(
+    reserveMessages.map((message) => message.reserve_sort_order),
+    Array.from({ length: 18 }, (_, index) => index + 1)
+  );
+
+  const fixture = await createFixture({ reserveEnabled: true, lumis: [] });
+  const changedMessageId = reserveMessages[0].id;
+  const preservedRevealTime = new Date(Date.now() - 60_000).toISOString();
+
+  try {
+    const { error: preferenceError } = await admin
+      .from("necklace_reserve_items")
+      .update({
+        is_approved: false,
+        reveal_count: 7,
+        last_revealed_at: preservedRevealTime,
+      })
+      .eq("necklace_id", fixture.necklaceId)
+      .eq("message_id", changedMessageId);
+    if (preferenceError) {
+      throw new Error(`Failed to set Reserve preference: ${preferenceError.message}`);
+    }
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const { data, error } = await admin.rpc("initialize_necklace_lumi_reserve", {
+        p_necklace_id: fixture.necklaceId,
+      });
+      assert.equal(error, null);
+      assert.equal((data as { status?: string } | null)?.status, "ok");
+    }
+
+    const { data: items, error: itemError } = await admin
+      .from("necklace_reserve_items")
+      .select("message_id, is_approved, reveal_count, last_revealed_at")
+      .eq("necklace_id", fixture.necklaceId);
+    if (itemError || !items) {
+      throw new Error(
+        `Failed to load initialized Reserve items: ${itemError?.message ?? "unknown error"}`
+      );
+    }
+
+    assert.equal(items.length, 18);
+    const changedItem = items.find((item) => item.message_id === changedMessageId);
+    assert.equal(changedItem?.is_approved, false);
+    assert.equal(changedItem?.reveal_count, 7);
+    assert.equal(
+      new Date(changedItem?.last_revealed_at ?? "").getTime(),
+      new Date(preservedRevealTime).getTime()
+    );
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test("Reserve requires explicit enabled settings and an approved eligible message", async () => {
+  if (await skipIfRecipientSchemaMissing()) {
+    return;
+  }
+
+  const disabled = await createFixture({ reserveEnabled: false, lumis: [] });
+  const missing = await createFixture({ reserveEnabled: true, lumis: [] });
+  const unapproved = await createFixture({ reserveEnabled: true, lumis: [] });
+
+  try {
+    assert.equal((await callResolve(disabled.rawToken)).status, "empty");
+
+    await admin
+      .from("necklace_reserve_settings")
+      .delete()
+      .eq("necklace_id", missing.necklaceId);
+    assert.equal((await callResolve(missing.rawToken)).status, "empty");
+
+    await admin
+      .from("necklace_reserve_items")
+      .update({ is_approved: false })
+      .eq("necklace_id", unapproved.necklaceId);
+    assert.equal((await callResolve(unapproved.rawToken)).status, "empty");
+  } finally {
+    await cleanupFixture(disabled);
+    await cleanupFixture(missing);
+    await cleanupFixture(unapproved);
+  }
+});
+
+test("Reserve excludes inactive templates and non-Reserve catalog messages", async () => {
+  if (await skipIfRecipientSchemaMissing()) {
+    return;
+  }
+
+  const fixture = await createFixture({ reserveEnabled: true, lumis: [] });
+  let inactiveMessageId: string | null = null;
+
+  try {
+    const [{ data: reserveMessage }, { data: nonReserveMessage }] =
+      await Promise.all([
+        admin
+          .from("messages")
+          .select("id")
+          .eq("is_reserve_eligible", true)
+          .eq("is_active", true)
+          .order("reserve_sort_order", { ascending: true })
+          .limit(1)
+          .single(),
+        admin
+          .from("messages")
+          .select("id")
+          .eq("is_reserve_eligible", false)
+          .eq("is_active", true)
+          .limit(1)
+          .single(),
+      ]);
+    assert.ok(reserveMessage);
+    assert.ok(nonReserveMessage);
+    inactiveMessageId = reserveMessage.id;
+
+    await admin
+      .from("necklace_reserve_items")
+      .update({ is_approved: false })
+      .eq("necklace_id", fixture.necklaceId);
+    await admin
+      .from("necklace_reserve_items")
+      .update({ is_approved: true })
+      .eq("necklace_id", fixture.necklaceId)
+      .eq("message_id", inactiveMessageId);
+    await admin
+      .from("messages")
+      .update({ is_active: false })
+      .eq("id", inactiveMessageId);
+
+    assert.equal((await callResolve(fixture.rawToken)).status, "empty");
+
+    const { error: nonReserveItemError } = await admin
+      .from("necklace_reserve_items")
+      .insert({
+        necklace_id: fixture.necklaceId,
+        message_id: nonReserveMessage.id,
+        is_approved: true,
+      });
+    assert.equal(nonReserveItemError, null);
+    assert.equal((await callResolve(fixture.rawToken)).status, "empty");
+  } finally {
+    if (inactiveMessageId) {
+      await admin
+        .from("messages")
+        .update({ is_active: true })
+        .eq("id", inactiveMessageId);
+    }
+    await cleanupFixture(fixture);
+  }
+});
+
+test("repeated Reserve resolve and concurrent confirmation are idempotent", async () => {
+  if (await skipIfRecipientSchemaMissing()) {
+    return;
+  }
+
+  const fixture = await createFixture({ reserveEnabled: true, lumis: [] });
+
+  try {
+    const firstResolve = await callResolve(fixture.rawToken);
+    const secondResolve = await callResolve(fixture.rawToken);
+    assertReadyResolve(firstResolve);
+    assertReadyResolve(secondResolve);
+    assert.deepEqual(secondResolve, firstResolve);
+    assertExactKeys(firstResolve, [
+      "status",
+      "revealSessionId",
+      "necklace",
+      "lumi",
+      "presentation",
+    ]);
+
+    const { data: originalMessage } = await admin
+      .from("messages")
+      .select("text")
+      .eq("id", firstResolve.lumi.id)
+      .single();
+    assert.ok(originalMessage);
+
+    const [firstConfirmation, secondConfirmation] = await Promise.all([
+      callRevealed(firstResolve.revealSessionId),
+      callRevealed(firstResolve.revealSessionId),
+    ]);
+    assertSuccessfulReveal(firstConfirmation);
+    assertSuccessfulReveal(secondConfirmation);
+    assert.equal(firstConfirmation.revealedAt, secondConfirmation.revealedAt);
+
+    const [{ data: reserveItem }, { data: personalRows }, { data: currentMessage }, {
+      data: events,
+    }] = await Promise.all([
+      admin
+        .from("necklace_reserve_items")
+        .select("reveal_count, last_revealed_at")
+        .eq("necklace_id", fixture.necklaceId)
+        .eq("message_id", firstResolve.lumi.id)
+        .single(),
+      admin.from("necklace_lumis").select("id").eq("necklace_id", fixture.necklaceId),
+      admin.from("messages").select("text").eq("id", firstResolve.lumi.id).single(),
+      admin
+        .from("tap_events")
+        .select("id")
+        .eq("reveal_session_id", firstResolve.revealSessionId)
+        .eq("status", "lumi_revealed"),
+    ]);
+
+    assert.equal(reserveItem?.reveal_count, 1);
+    assert.equal(typeof reserveItem?.last_revealed_at, "string");
+    assert.deepEqual(personalRows, []);
+    assert.equal(currentMessage?.text, originalMessage.text);
+    assert.equal(events?.length, 1);
   } finally {
     await cleanupFixture(fixture);
   }

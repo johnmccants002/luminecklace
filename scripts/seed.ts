@@ -24,6 +24,9 @@ type SeedMessage = {
   category: MessageCategory;
   tone: MessageTone;
   active: boolean;
+  reserveEligible: boolean;
+  reserveDefaultApproved: boolean;
+  reserveSortOrder: number | null;
 };
 
 type SeedPackage = {
@@ -45,13 +48,16 @@ type MessageRow = {
   is_active?: boolean | null;
   category?: string | null;
   tone?: string | null;
+  is_reserve_eligible?: boolean | null;
+  reserve_default_approved?: boolean | null;
+  reserve_sort_order?: number | null;
 };
 
 type NecklaceSkuRow = {
   base_package_ids?: unknown;
 };
 
-const HEART_CORE_MESSAGES: SeedMessage[] = [
+const HEART_CORE_MESSAGE_DEFINITIONS = [
   { text: "You are loved more than you know.", category: "affection", tone: "warm", active: true },
   { text: "I'm so glad you're here.", category: "affection", tone: "warm", active: true },
   { text: "You make this world better just by being in it.", category: "affection", tone: "warm", active: true },
@@ -92,7 +98,44 @@ const HEART_CORE_MESSAGES: SeedMessage[] = [
   { text: "You are still growing, and that is a good thing.", category: "reassurance", tone: "comforting", active: true },
   { text: "You are not behind. You are on your path.", category: "reassurance", tone: "comforting", active: true },
   { text: "You are loved through every version of today.", category: "reassurance", tone: "comforting", active: true },
-];
+] satisfies Array<Omit<SeedMessage, "reserveEligible" | "reserveDefaultApproved" | "reserveSortOrder">>;
+
+const RESERVE_MESSAGE_TEXTS = [
+  "You are loved more than you know.",
+  "I'm so glad you're here.",
+  "You matter to me every single day.",
+  "You are deeply appreciated.",
+  "You don't have to carry everything alone.",
+  "It's okay to pause and breathe for a minute.",
+  "You are allowed to rest.",
+  "Take your time. There is no rush here.",
+  "You can do this, one small step at a time.",
+  "Your effort counts, even when progress feels slow.",
+  "I believe in you, especially right now.",
+  "Your pace is valid. Keep moving forward.",
+  "I'm right here with you.",
+  "You are not alone in this.",
+  "I'm in your corner, always.",
+  "You are enough exactly as you are.",
+  "You are doing better than you think.",
+  "You don't need to be perfect to be loved.",
+] as const;
+
+const reserveSortOrderByText = new Map<string, number>(
+  RESERVE_MESSAGE_TEXTS.map((text, index) => [text, index + 1])
+);
+
+const HEART_CORE_MESSAGES: SeedMessage[] = HEART_CORE_MESSAGE_DEFINITIONS.map(
+  (message) => {
+    const reserveSortOrder = reserveSortOrderByText.get(message.text) ?? null;
+    return {
+      ...message,
+      reserveEligible: reserveSortOrder !== null,
+      reserveDefaultApproved: reserveSortOrder !== null,
+      reserveSortOrder,
+    };
+  }
+);
 
 const SEED_PACKAGES: SeedPackage[] = [
   {
@@ -215,7 +258,14 @@ async function seedMessages() {
   const allSeedTexts = SEED_PACKAGES.flatMap((pkg) =>
     pkg.messages.map((message) => message.text)
   );
-  const selectColumns = ["package_id", "text", "is_active"];
+  const selectColumns = [
+    "package_id",
+    "text",
+    "is_active",
+    "is_reserve_eligible",
+    "reserve_default_approved",
+    "reserve_sort_order",
+  ];
   if (supportsCategory) {
     selectColumns.push("category");
   }
@@ -255,12 +305,18 @@ async function seedMessages() {
           package_id: string;
           text: string;
           is_active: boolean;
+          is_reserve_eligible: boolean;
+          reserve_default_approved: boolean;
+          reserve_sort_order: number | null;
           category?: MessageCategory;
           tone?: MessageTone;
         } = {
           package_id: pkg.id,
           text: message.text,
           is_active: message.active,
+          is_reserve_eligible: message.reserveEligible,
+          reserve_default_approved: message.reserveDefaultApproved,
+          reserve_sort_order: message.reserveSortOrder,
         };
 
         if (supportsCategory) {
@@ -285,12 +341,26 @@ async function seedMessages() {
 
         const updatePayload: {
           is_active?: boolean;
+          is_reserve_eligible?: boolean;
+          reserve_default_approved?: boolean;
+          reserve_sort_order?: number | null;
           category?: MessageCategory;
           tone?: MessageTone;
         } = {};
 
         if (existing.is_active !== message.active) {
           updatePayload.is_active = message.active;
+        }
+        if (existing.is_reserve_eligible !== message.reserveEligible) {
+          updatePayload.is_reserve_eligible = message.reserveEligible;
+        }
+        if (
+          existing.reserve_default_approved !== message.reserveDefaultApproved
+        ) {
+          updatePayload.reserve_default_approved = message.reserveDefaultApproved;
+        }
+        if (existing.reserve_sort_order !== message.reserveSortOrder) {
+          updatePayload.reserve_sort_order = message.reserveSortOrder;
         }
 
         if (supportsCategory && existing.category !== message.category) {
@@ -317,6 +387,9 @@ async function seedMessages() {
           text: string;
           updatePayload: {
             is_active?: boolean;
+            is_reserve_eligible?: boolean;
+            reserve_default_approved?: boolean;
+            reserve_sort_order?: number | null;
             category?: MessageCategory;
             tone?: MessageTone;
           };
@@ -362,11 +435,52 @@ async function seedMessages() {
   console.log("[seed] Message updates complete.");
 }
 
+async function synchronizeExistingNecklaces() {
+  const { data: necklaces, error: necklacesError } = await supabaseAdmin
+    .from("necklaces")
+    .select("id");
+
+  if (necklacesError) {
+    throw new Error(
+      `[seed] Failed to load necklaces for Reserve synchronization: ${necklacesError.message}`
+    );
+  }
+
+  for (const necklace of necklaces ?? []) {
+    const { data, error } = await supabaseAdmin.rpc(
+      "initialize_necklace_lumi_reserve",
+      { p_necklace_id: necklace.id }
+    );
+
+    if (error) {
+      throw new Error(
+        `[seed] Failed to synchronize Reserve for necklace ${necklace.id}: ${error.message}`
+      );
+    }
+
+    if (
+      !data ||
+      typeof data !== "object" ||
+      !("status" in data) ||
+      data.status !== "ok"
+    ) {
+      throw new Error(
+        `[seed] Reserve initializer returned an invalid result for necklace ${necklace.id}`
+      );
+    }
+  }
+
+  console.log(
+    `[seed] Synchronized Lumi Reserve for ${(necklaces ?? []).length} necklaces.`
+  );
+}
+
 async function main() {
   console.log("[seed] Starting seed...");
   await seedPackages();
   await seedSkuMappings();
   await seedMessages();
+  await synchronizeExistingNecklaces();
   console.log("[seed] Done.");
 }
 

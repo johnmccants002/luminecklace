@@ -9,6 +9,7 @@ type ResolveRpcResult = {
   status?: string | null;
   reveal_session_id?: string | null;
   necklace_display_name?: string | null;
+  lumi_id?: string | null;
   necklace_lumi_id?: string | null;
   lumi_text?: string | null;
   presentation?: {
@@ -68,9 +69,12 @@ export async function resolveNextRecipientTap(
   }
 
   if (data.status === "ready") {
+    const lumiId = isNonEmptyString(data.lumi_id)
+      ? data.lumi_id
+      : data.necklace_lumi_id;
     if (
       !isNonEmptyString(data.reveal_session_id) ||
-      !isNonEmptyString(data.necklace_lumi_id) ||
+      !isNonEmptyString(lumiId) ||
       !isNonEmptyString(data.lumi_text)
     ) {
       throw new Error("Failed to resolve necklace");
@@ -87,7 +91,7 @@ export async function resolveNextRecipientTap(
           : "Lumi Necklace",
       },
       lumi: {
-        id: data.necklace_lumi_id,
+        id: lumiId,
         text: data.lumi_text,
       },
       presentation: {
