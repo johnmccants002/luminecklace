@@ -1,5 +1,13 @@
 -- Shopify paid-order ingestion, per-unit allocation, and resumable account provisioning.
 
+-- The profiles table can predate the sender-first schema. Normalize the
+-- columns this migration uses before syncing authoritative Auth emails.
+alter table public.profiles
+    add column if not exists email text,
+    add column if not exists display_name text,
+    add column if not exists created_at timestamptz not null default now(),
+    add column if not exists updated_at timestamptz not null default now();
+
 alter table public.profiles
     add column if not exists email_normalized text
         generated always as (lower(btrim(email))) stored;
@@ -50,6 +58,15 @@ create policy profiles_owner_update on public.profiles
 revoke update on public.profiles from authenticated;
 grant update (display_name) on public.profiles to authenticated;
 
+-- Normalize legacy order tables for projects where the original
+-- CREATE TABLE IF NOT EXISTS encountered an older relation.
+alter table public.orders
+    add column if not exists external_order_ref text,
+    add column if not exists purchaser_email_normalized text,
+    add column if not exists status text not null default 'pending_claim',
+    add column if not exists created_at timestamptz not null default now(),
+    add column if not exists claimed_at timestamptz;
+
 alter table public.orders
     alter column purchaser_email_normalized drop not null,
     add column if not exists shop_domain text,
@@ -89,6 +106,12 @@ create index if not exists orders_pending_purchaser_email_idx
     on public.orders (purchaser_email_normalized)
     where purchaser_auth_user_id is null
       and ingestion_outcome = 'ready';
+
+alter table public.order_items
+    add column if not exists order_id uuid references public.orders (id) on delete cascade,
+    add column if not exists sku text,
+    add column if not exists quantity integer not null default 1,
+    add column if not exists created_at timestamptz not null default now();
 
 alter table public.order_items
     alter column sku drop not null,
