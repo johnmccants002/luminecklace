@@ -87,6 +87,49 @@ export class SenderApiError extends Error {
   }
 }
 
+export type SenderOwnedNecklace = {
+  id: string;
+  lifecycleStatus: string;
+};
+
+export async function requireSenderOwnedNecklace(
+  client: SupabaseClient,
+  userId: string,
+  necklaceId: string
+): Promise<SenderOwnedNecklace> {
+  const { data: necklaceData, error: necklaceError } = await client
+    .from("necklaces")
+    .select("id, lifecycle_status")
+    .eq("id", necklaceId)
+    .maybeSingle<{ id: string; lifecycle_status: string }>();
+
+  if (necklaceError) {
+    throw new Error(necklaceError.message);
+  }
+  if (!necklaceData) {
+    throw new SenderApiError("Necklace not found", 404);
+  }
+
+  const { data: ownershipData, error: ownershipError } = await client
+    .from("necklace_ownerships")
+    .select("id")
+    .eq("necklace_id", necklaceId)
+    .eq("sender_user_id", userId)
+    .maybeSingle<{ id: string }>();
+
+  if (ownershipError) {
+    throw new Error(ownershipError.message);
+  }
+  if (!ownershipData) {
+    throw new SenderApiError("Forbidden", 403);
+  }
+
+  return {
+    id: necklaceData.id,
+    lifecycleStatus: necklaceData.lifecycle_status,
+  };
+}
+
 export function normalizeLumiText(value: unknown): string {
   const text = typeof value === "string" ? value.trim() : "";
   if (!text) {
@@ -256,7 +299,7 @@ export async function listSenderNecklaces(
     });
 }
 
-function parseRpcLumi(value: unknown): SenderLumi {
+export function parseRpcLumi(value: unknown): SenderLumi {
   const result = value as EnqueueRpcResult | null;
   if (
     !result ||
@@ -383,33 +426,12 @@ export async function enqueueSenderLumi(
   necklaceId: string,
   text: string
 ): Promise<SenderLumi> {
-  const { data: necklaceData, error: necklaceError } = await client
-    .from("necklaces")
-    .select("id, lifecycle_status")
-    .eq("id", necklaceId)
-    .maybeSingle<{ id: string; lifecycle_status: string }>();
-
-  if (necklaceError) {
-    throw new Error(necklaceError.message);
-  }
-  if (!necklaceData) {
-    throw new SenderApiError("Necklace not found", 404);
-  }
-
-  const { data: ownershipData, error: ownershipError } = await client
-    .from("necklace_ownerships")
-    .select("id")
-    .eq("necklace_id", necklaceId)
-    .eq("sender_user_id", userId)
-    .maybeSingle<{ id: string }>();
-
-  if (ownershipError) {
-    throw new Error(ownershipError.message);
-  }
-  if (!ownershipData) {
-    throw new SenderApiError("Forbidden", 403);
-  }
-  if (!["active", "pending_sender_setup"].includes(necklaceData.lifecycle_status)) {
+  const necklace = await requireSenderOwnedNecklace(
+    client,
+    userId,
+    necklaceId
+  );
+  if (!["active", "pending_sender_setup"].includes(necklace.lifecycleStatus)) {
     throw new SenderApiError("This Lumi cannot accept new messages", 409);
   }
 

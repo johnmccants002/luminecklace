@@ -27,6 +27,8 @@ type SeedMessage = {
   reserveEligible: boolean;
   reserveDefaultApproved: boolean;
   reserveSortOrder: number | null;
+  explorePublished: boolean;
+  exploreSortOrder: number;
 };
 
 type SeedPackage = {
@@ -51,6 +53,8 @@ type MessageRow = {
   is_reserve_eligible?: boolean | null;
   reserve_default_approved?: boolean | null;
   reserve_sort_order?: number | null;
+  is_explore_published?: boolean | null;
+  explore_sort_order?: number | null;
 };
 
 type NecklaceSkuRow = {
@@ -98,7 +102,16 @@ const HEART_CORE_MESSAGE_DEFINITIONS = [
   { text: "You are still growing, and that is a good thing.", category: "reassurance", tone: "comforting", active: true },
   { text: "You are not behind. You are on your path.", category: "reassurance", tone: "comforting", active: true },
   { text: "You are loved through every version of today.", category: "reassurance", tone: "comforting", active: true },
-] satisfies Array<Omit<SeedMessage, "reserveEligible" | "reserveDefaultApproved" | "reserveSortOrder">>;
+] satisfies Array<
+  Omit<
+    SeedMessage,
+    | "reserveEligible"
+    | "reserveDefaultApproved"
+    | "reserveSortOrder"
+    | "explorePublished"
+    | "exploreSortOrder"
+  >
+>;
 
 const RESERVE_MESSAGE_TEXTS = [
   "You are loved more than you know.",
@@ -125,14 +138,21 @@ const reserveSortOrderByText = new Map<string, number>(
   RESERVE_MESSAGE_TEXTS.map((text, index) => [text, index + 1])
 );
 
+const exploreCountByCategory = new Map<MessageCategory, number>();
+
 const HEART_CORE_MESSAGES: SeedMessage[] = HEART_CORE_MESSAGE_DEFINITIONS.map(
   (message) => {
     const reserveSortOrder = reserveSortOrderByText.get(message.text) ?? null;
+    const exploreSortOrder =
+      (exploreCountByCategory.get(message.category) ?? 0) + 1;
+    exploreCountByCategory.set(message.category, exploreSortOrder);
     return {
       ...message,
       reserveEligible: reserveSortOrder !== null,
       reserveDefaultApproved: reserveSortOrder !== null,
       reserveSortOrder,
+      explorePublished: message.active,
+      exploreSortOrder,
     };
   }
 );
@@ -265,6 +285,8 @@ async function seedMessages() {
     "is_reserve_eligible",
     "reserve_default_approved",
     "reserve_sort_order",
+    "is_explore_published",
+    "explore_sort_order",
   ];
   if (supportsCategory) {
     selectColumns.push("category");
@@ -308,6 +330,8 @@ async function seedMessages() {
           is_reserve_eligible: boolean;
           reserve_default_approved: boolean;
           reserve_sort_order: number | null;
+          is_explore_published: boolean;
+          explore_sort_order: number;
           category?: MessageCategory;
           tone?: MessageTone;
         } = {
@@ -317,6 +341,8 @@ async function seedMessages() {
           is_reserve_eligible: message.reserveEligible,
           reserve_default_approved: message.reserveDefaultApproved,
           reserve_sort_order: message.reserveSortOrder,
+          is_explore_published: message.explorePublished,
+          explore_sort_order: message.exploreSortOrder,
         };
 
         if (supportsCategory) {
@@ -344,6 +370,8 @@ async function seedMessages() {
           is_reserve_eligible?: boolean;
           reserve_default_approved?: boolean;
           reserve_sort_order?: number | null;
+          is_explore_published?: boolean;
+          explore_sort_order?: number;
           category?: MessageCategory;
           tone?: MessageTone;
         } = {};
@@ -361,6 +389,12 @@ async function seedMessages() {
         }
         if (existing.reserve_sort_order !== message.reserveSortOrder) {
           updatePayload.reserve_sort_order = message.reserveSortOrder;
+        }
+        if (existing.is_explore_published !== message.explorePublished) {
+          updatePayload.is_explore_published = message.explorePublished;
+        }
+        if (existing.explore_sort_order !== message.exploreSortOrder) {
+          updatePayload.explore_sort_order = message.exploreSortOrder;
         }
 
         if (supportsCategory && existing.category !== message.category) {
@@ -390,6 +424,8 @@ async function seedMessages() {
             is_reserve_eligible?: boolean;
             reserve_default_approved?: boolean;
             reserve_sort_order?: number | null;
+            is_explore_published?: boolean;
+            explore_sort_order?: number;
             category?: MessageCategory;
             tone?: MessageTone;
           };
