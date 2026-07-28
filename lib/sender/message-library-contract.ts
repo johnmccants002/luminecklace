@@ -1,6 +1,6 @@
 import { SenderApiError } from "@/lib/sender/necklaces";
 
-export const MESSAGE_LIBRARY_CATEGORIES = [
+export const DEFAULT_MESSAGE_LIBRARY_CATEGORIES = [
   { key: "affection", name: "Affection", sortOrder: 1 },
   { key: "comfort", name: "Comfort", sortOrder: 2 },
   { key: "encouragement", name: "Encouragement", sortOrder: 3 },
@@ -8,8 +8,7 @@ export const MESSAGE_LIBRARY_CATEGORIES = [
   { key: "reassurance", name: "Reassurance", sortOrder: 5 },
 ] as const;
 
-export type MessageLibraryCategoryKey =
-  (typeof MESSAGE_LIBRARY_CATEGORIES)[number]["key"];
+export type MessageLibraryCategoryKey = string;
 
 export type MessageLibraryCursor = {
   category: MessageLibraryCategoryKey;
@@ -37,11 +36,12 @@ export function parseLibraryCategory(value: unknown) {
   if (value === null || value === undefined || value === "") return undefined;
   if (
     typeof value !== "string" ||
-    !MESSAGE_LIBRARY_CATEGORIES.some((category) => category.key === value)
+    !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) ||
+    value.length > 50
   ) {
     throw new SenderApiError("category is not supported", 400);
   }
-  return value as MessageLibraryCategoryKey;
+  return value;
 }
 
 export function parseLibraryLimit(value: unknown) {
@@ -71,9 +71,9 @@ export function decodeLibraryCursor(
       | null;
     if (
       !parsed ||
-      !MESSAGE_LIBRARY_CATEGORIES.some(
-        (category) => category.key === parsed.category
-      ) ||
+      typeof parsed.category !== "string" ||
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(parsed.category) ||
+      parsed.category.length > 50 ||
       !Number.isInteger(parsed.sortOrder) ||
       (parsed.sortOrder ?? -1) < 0 ||
       typeof parsed.id !== "string" ||
@@ -86,4 +86,3 @@ export function decodeLibraryCursor(
     throw new SenderApiError("cursor is invalid", 400);
   }
 }
-

@@ -1,0 +1,82 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { resolveNextRecipientTap } from "../lib/tap/recipient";
+
+function rpcResult(data: unknown) {
+  return {
+    rpc: async () => ({ data, error: null }),
+  };
+}
+
+test("recipient ready mapping returns stored presentation and safe preset defaults", async () => {
+  const customized = await resolveNextRecipientTap(
+    rpcResult({
+      status: "ready",
+      reveal_session_id: "session-id",
+      necklace_display_name: "Lumi",
+      lumi_id: "lumi-id",
+      lumi_text: "Hello",
+      presentation: {
+        theme: "heart",
+        animation: "breathe",
+        sound: "soft",
+        revealPreset: "wordRise",
+        background: "midnight",
+        font: "rounded",
+        textSize: "large",
+        textAlignment: "trailing",
+        textPosition: "bottom",
+      },
+    }),
+    "token"
+  );
+  assert.equal(customized.status, "ready");
+  if (customized.status === "ready") {
+    assert.equal(customized.presentation.background, "midnight");
+    assert.equal(customized.presentation.font, "rounded");
+    assert.equal(customized.presentation.textSize, "large");
+    assert.equal(customized.presentation.textAlignment, "trailing");
+    assert.equal(customized.presentation.textPosition, "bottom");
+  }
+
+  const incomplete = await resolveNextRecipientTap(
+    rpcResult({
+      status: "ready",
+      reveal_session_id: "session-id",
+      lumi_id: "lumi-id",
+      lumi_text: "Hello",
+      presentation: {
+        background: "url(https://example.com)",
+        font: "Unsupported Font",
+        textSize: "calc(100%)",
+        textAlignment: "justify",
+        textPosition: "25%",
+      },
+    }),
+    "token"
+  );
+  assert.equal(incomplete.status, "ready");
+  if (incomplete.status === "ready") {
+    assert.equal(incomplete.presentation.background, "rose_glow");
+    assert.equal(incomplete.presentation.font, "serif");
+    assert.equal(incomplete.presentation.revealPreset, "wordRise");
+    assert.equal(incomplete.presentation.textSize, "medium");
+    assert.equal(incomplete.presentation.textAlignment, "center");
+    assert.equal(incomplete.presentation.textPosition, "center");
+  }
+});
+
+test("recipient ready mapping rejects missing required reveal data", async () => {
+  await assert.rejects(
+    resolveNextRecipientTap(
+      rpcResult({
+        status: "ready",
+        reveal_session_id: "session-id",
+        lumi_id: "lumi-id",
+      }),
+      "token"
+    ),
+    /Failed to resolve necklace/
+  );
+});

@@ -1,3 +1,13 @@
+import {
+  LUMI_BACKGROUND_KEYS,
+  LUMI_FONT_KEYS,
+  safeTextAlignment,
+  safeTextPosition,
+  safeTextSize,
+  type LumiBackgroundKey,
+  type LumiFontKey,
+} from "@/lib/sender/necklaces";
+
 type RpcClient = {
   rpc: (
     fn: string,
@@ -16,6 +26,12 @@ type ResolveRpcResult = {
     theme?: string | null;
     animation?: string | null;
     sound?: string | null;
+    revealPreset?: string | null;
+    background?: string | null;
+    font?: string | null;
+    textSize?: string | null;
+    textAlignment?: string | null;
+    textPosition?: string | null;
   } | null;
 };
 
@@ -30,7 +46,17 @@ export type PublicRecipientResolveResponse =
       revealSessionId: string;
       necklace: { displayName: string };
       lumi: { id: string; text: string };
-      presentation: { theme: string; animation: string; sound: string };
+      presentation: {
+        theme: string;
+        animation: string;
+        sound: string;
+        revealPreset: string;
+        background: string;
+        font: string;
+        textSize: "small" | "medium" | "large";
+        textAlignment: "leading" | "center" | "trailing";
+        textPosition: "top" | "center" | "bottom";
+      };
     }
   | { status: "empty" }
   | { status: "unavailable" };
@@ -42,6 +68,20 @@ export type PublicRecipientRevealResponse =
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function safeBackground(value: unknown): LumiBackgroundKey {
+  return typeof value === "string" &&
+    LUMI_BACKGROUND_KEYS.includes(value as LumiBackgroundKey)
+    ? (value as LumiBackgroundKey)
+    : "rose_glow";
+}
+
+function safeFont(value: unknown): LumiFontKey {
+  return typeof value === "string" &&
+    LUMI_FONT_KEYS.includes(value as LumiFontKey)
+    ? (value as LumiFontKey)
+    : "serif";
 }
 
 function isResolveRpcResult(value: unknown): value is ResolveRpcResult {
@@ -100,6 +140,14 @@ export async function resolveNextRecipientTap(
           ? presentation.animation
           : "breathe",
         sound: isNonEmptyString(presentation.sound) ? presentation.sound : "soft",
+        revealPreset: isNonEmptyString(presentation.revealPreset)
+          ? presentation.revealPreset
+          : "wordRise",
+        background: safeBackground(presentation.background),
+        font: safeFont(presentation.font),
+        textSize: safeTextSize(presentation.textSize),
+        textAlignment: safeTextAlignment(presentation.textAlignment),
+        textPosition: safeTextPosition(presentation.textPosition),
       },
     };
   }

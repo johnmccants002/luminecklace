@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/requireUser";
 import {
   editSenderLumi,
+  normalizeLumiPresentation,
   normalizeLumiText,
   removeSenderLumi,
   SenderApiError,
@@ -12,6 +13,7 @@ import { getSupabaseConnectionErrorMessage } from "@/lib/supabase/env";
 
 type EditBody = {
   text?: unknown;
+  presentation?: unknown;
 };
 
 type RouteContext = {
@@ -64,14 +66,16 @@ export async function PATCH(req: Request, context: RouteContext) {
     }
 
     const text = normalizeLumiText(body.text);
-    const lumi = await editSenderLumi(
+    const presentation = normalizeLumiPresentation(body.presentation);
+    const result = await editSenderLumi(
       supabaseAdmin,
       user.id,
       necklaceId,
       lumiId,
-      text
+      text,
+      presentation
     );
-    return NextResponse.json({ lumi });
+    return NextResponse.json(result);
   } catch (error) {
     return handleError(error, "edit");
   }

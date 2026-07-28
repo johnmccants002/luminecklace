@@ -1,3 +1,18 @@
+import { DEFAULT_MESSAGE_LIBRARY_CATEGORIES } from "@/lib/sender/message-library-contract";
+import {
+  DEFAULT_LUMI_PRESENTATION,
+  LUMI_BACKGROUND_KEYS,
+  LUMI_FONT_KEYS,
+  LUMI_TEXT_ALIGNMENT_KEYS,
+  LUMI_TEXT_POSITION_KEYS,
+  LUMI_TEXT_SIZE_KEYS,
+  type LumiBackgroundKey,
+  type LumiFontKey,
+  type LumiTextAlignmentKey,
+  type LumiTextPositionKey,
+  type LumiTextSizeKey,
+} from "@/lib/sender/necklaces";
+
 export const MAX_IMPORT_BYTES = 1_000_000;
 export const MAX_IMPORT_ROWS = 1_000;
 
@@ -9,7 +24,17 @@ export type TemplateImportRow = {
   status: "draft" | "published" | "archived";
   sortOrder: number;
   metadata: Record<string, unknown>;
-  publishedAt: string | null;
+  themeKey: string;
+  animationKey: string;
+  soundKey: string;
+  backgroundKey: LumiBackgroundKey;
+  fontKey: LumiFontKey;
+  textSizeKey: LumiTextSizeKey;
+  textAlignmentKey: LumiTextAlignmentKey;
+  textPositionKey: LumiTextPositionKey;
+  reserveEligible: boolean;
+  reserveDefaultApproved: boolean;
+  reserveSortOrder: number | null;
 };
 
 export type ImportIssue = {
@@ -77,9 +102,21 @@ function textValue(row: Record<string, unknown>, ...keys: string[]) {
   return "";
 }
 
+function booleanValue(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    if (value.trim().toLowerCase() === "true") return true;
+    if (value.trim().toLowerCase() === "false") return false;
+  }
+  return fallback;
+}
+
 export function parseMessageTemplateImport(
   text: string,
-  sourceType: "csv" | "json"
+  sourceType: "csv" | "json",
+  supportedCategories: ReadonlySet<string> = new Set(
+    DEFAULT_MESSAGE_LIBRARY_CATEGORIES.map((category) => category.key)
+  )
 ): { validRows: TemplateImportRow[]; issues: ImportIssue[]; totalRows: number } {
   const sourceRows = parseSource(text.replace(/^\uFEFF/, ""), sourceType);
   if (sourceRows.length > MAX_IMPORT_ROWS) {
@@ -116,13 +153,123 @@ export function parseMessageTemplateImport(
         return;
       }
     }
+    const reserveEligible = booleanValue(
+      row.reserve_eligible ?? row.reserveEligible ?? metadata.reserveEligible,
+      false
+    );
+    const reserveDefaultApproved = booleanValue(
+      row.reserve_default_approved ??
+        row.reserveDefaultApproved ??
+        metadata.reserveDefaultApproved,
+      false
+    );
+    const reserveSortRaw =
+      row.reserve_sort_order ??
+      row.reserveSortOrder ??
+      metadata.reserveSortOrder ??
+      null;
+    const reserveSortOrder =
+      reserveSortRaw === null || reserveSortRaw === ""
+        ? null
+        : typeof reserveSortRaw === "number"
+          ? reserveSortRaw
+          : typeof reserveSortRaw === "string" &&
+              /^\d+$/.test(reserveSortRaw.trim())
+            ? Number(reserveSortRaw)
+            : Number.NaN;
+    const themeKey =
+      textValue(row, "theme", "theme_key", "themeKey") ||
+      textValue(metadata, "theme", "themeKey") ||
+      "heart";
+    const animationKey =
+      textValue(row, "animation", "animation_key", "animationKey") ||
+      textValue(metadata, "animation", "animationKey") ||
+      "breathe";
+    const soundKey =
+      textValue(row, "sound", "sound_key", "soundKey") ||
+      textValue(metadata, "sound", "soundKey") ||
+      "soft";
+    const backgroundKey =
+      textValue(row, "background", "background_key", "backgroundKey") ||
+      textValue(metadata, "background", "backgroundKey") ||
+      DEFAULT_LUMI_PRESENTATION.background;
+    const fontKey =
+      textValue(row, "font", "font_key", "fontKey") ||
+      textValue(metadata, "font", "fontKey") ||
+      DEFAULT_LUMI_PRESENTATION.font;
+    const textSizeKey =
+      textValue(row, "text_size", "text_size_key", "textSizeKey", "textSize") ||
+      textValue(metadata, "textSize", "textSizeKey") ||
+      DEFAULT_LUMI_PRESENTATION.textSize;
+    const textAlignmentKey =
+      textValue(
+        row,
+        "text_alignment",
+        "text_alignment_key",
+        "textAlignmentKey",
+        "textAlignment"
+      ) ||
+      textValue(metadata, "textAlignment", "textAlignmentKey") ||
+      DEFAULT_LUMI_PRESENTATION.textAlignment;
+    const textPositionKey =
+      textValue(
+        row,
+        "text_position",
+        "text_position_key",
+        "textPositionKey",
+        "textPosition"
+      ) ||
+      textValue(metadata, "textPosition", "textPositionKey") ||
+      DEFAULT_LUMI_PRESENTATION.textPosition;
 
     const errors: string[] = [];
     if (!importKey || importKey.length > 160) errors.push("import_key is required and must be 160 characters or fewer");
     if (!title || title.length > 200) errors.push("title is required and must be 200 characters or fewer");
     if (!content || content.length > 500) errors.push("content is required and must be 500 characters or fewer");
+    if (!category || !supportedCategories.has(category)) {
+      errors.push("category must match an active message category");
+    }
     if (!["draft", "published", "archived"].includes(statusValue)) errors.push("status must be draft, published, or archived");
     if (!Number.isSafeInteger(sortOrder) || sortOrder < 0) errors.push("sort_order must be a non-negative integer");
+    if (
+      reserveSortOrder !== null &&
+      (!Number.isSafeInteger(reserveSortOrder) || reserveSortOrder < 1)
+    ) {
+      errors.push("reserve_sort_order must be a positive integer when provided");
+    }
+    if (reserveDefaultApproved && !reserveEligible) {
+      errors.push("reserve_default_approved requires reserve_eligible");
+    }
+    for (const [label, value] of [
+      ["theme", themeKey],
+      ["animation", animationKey],
+      ["sound", soundKey],
+    ]) {
+      if (!/^[a-z0-9][a-z0-9_-]{0,49}$/i.test(value)) {
+        errors.push(`${label} must use letters, numbers, hyphens, or underscores`);
+      }
+    }
+    if (!LUMI_BACKGROUND_KEYS.includes(backgroundKey as LumiBackgroundKey)) {
+      errors.push("background_key is not supported");
+    }
+    if (!LUMI_FONT_KEYS.includes(fontKey as LumiFontKey)) {
+      errors.push("font_key is not supported");
+    }
+    if (!LUMI_TEXT_SIZE_KEYS.includes(textSizeKey as LumiTextSizeKey)) {
+      errors.push("text_size_key is not supported");
+    }
+    if (
+      !LUMI_TEXT_ALIGNMENT_KEYS.includes(
+        textAlignmentKey as LumiTextAlignmentKey
+      )
+    ) {
+      errors.push("text_alignment_key is not supported");
+    }
+    if (
+      !LUMI_TEXT_POSITION_KEYS.includes(textPositionKey as LumiTextPositionKey)
+    ) {
+      errors.push("text_position_key is not supported");
+    }
     if (keys.has(importKey)) errors.push("duplicate import_key in this file");
 
     if (errors.length) {
@@ -138,7 +285,17 @@ export function parseMessageTemplateImport(
       status: statusValue as TemplateImportRow["status"],
       sortOrder,
       metadata,
-      publishedAt: statusValue === "published" ? new Date().toISOString() : null,
+      themeKey,
+      animationKey,
+      soundKey,
+      backgroundKey: backgroundKey as LumiBackgroundKey,
+      fontKey: fontKey as LumiFontKey,
+      textSizeKey: textSizeKey as LumiTextSizeKey,
+      textAlignmentKey: textAlignmentKey as LumiTextAlignmentKey,
+      textPositionKey: textPositionKey as LumiTextPositionKey,
+      reserveEligible,
+      reserveDefaultApproved,
+      reserveSortOrder,
     });
   });
 

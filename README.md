@@ -162,10 +162,17 @@ import_key,title,content,category,status,sort_order,metadata
 welcome-001,Welcome,You are loved,affirmation,published,10,"{""tone"":""warm""}"
 ```
 
-`import_key`, `title`, and `content` are required. `status` is `draft`,
-`published`, or `archived`. `metadata` must be a JSON object. Imports upsert by
-stable `import_key` into `message_templates`, never into customer `messages`.
-Error-report CSV output neutralizes spreadsheet formula prefixes.
+`import_key`, `title`, `content`, and a supported `category` are required.
+`status` is `draft`, `published`, or `archived`. `metadata` must be a JSON
+object and may configure presentation and Reserve settings. Imports upsert by
+stable `import_key` into the global `messages` catalog while excluding
+customer-private messages. Error-report CSV output neutralizes spreadsheet
+formula prefixes.
+
+The same catalog can be browsed and edited directly at `/admin/messages`.
+Admins can create a reusable category inline while creating or editing a message.
+Explore publication, Reserve eligibility, ordering, activity, category, and
+presentation defaults are independently editable.
 
 Inventory imports on `/admin/necklaces` accept CSV/JSON fields `tag_ref`, `sku`,
 and `tap_token_hash`. Existing tag identifiers are skipped and never

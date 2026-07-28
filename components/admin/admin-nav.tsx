@@ -5,6 +5,7 @@ import {
   Boxes,
   FileUp,
   LayoutDashboard,
+  MessageSquareText,
   PackageCheck,
   Users,
 } from "lucide-react";
@@ -18,6 +19,7 @@ const items = [
   { href: "/admin/customers", label: "Customers", icon: Users },
   { href: "/admin/necklaces", label: "Necklaces", icon: Boxes },
   { href: "/admin/orders", label: "Orders", icon: PackageCheck },
+  { href: "/admin/messages", label: "Messages", icon: MessageSquareText },
   { href: "/admin/imports/messages", label: "Content imports", icon: FileUp },
   { href: "/admin/activity", label: "Activity", icon: Activity },
 ];
@@ -60,4 +62,3 @@ export function AdminNav({ mobile = false }: { mobile?: boolean }) {
     </nav>
   );
 }
-

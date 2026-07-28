@@ -26,10 +26,19 @@ async function readImport(req: Request) {
   const allowedTypes = ["text/csv", "application/csv", "application/json", "text/json", "text/plain", ""];
   if (!allowedTypes.includes(file.type)) throw new Error("Unsupported file MIME type");
   const sourceType = extension;
+  const categories = await supabaseAdmin
+    .from("message_categories")
+    .select("key")
+    .eq("is_active", true);
+  if (categories.error) throw new Error("Unable to load message categories");
   return {
     file,
     sourceType,
-    parsed: parseMessageTemplateImport(await file.text(), sourceType),
+    parsed: parseMessageTemplateImport(
+      await file.text(),
+      sourceType,
+      new Set((categories.data ?? []).map((category) => category.key))
+    ),
   };
 }
 
@@ -39,7 +48,7 @@ export async function PUT(req: Request) {
     const { parsed } = await readImport(req);
     const existing = parsed.validRows.length
       ? await supabaseAdmin
-          .from("message_templates")
+          .from("messages")
           .select("import_key")
           .in("import_key", parsed.validRows.map((row) => row.importKey))
       : { data: [], error: null };
@@ -67,7 +76,7 @@ export async function POST(req: Request) {
     const { file, sourceType, parsed } = await readImport(req);
     const existing = parsed.validRows.length
       ? await supabaseAdmin
-          .from("message_templates")
+          .from("messages")
           .select("import_key")
           .in("import_key", parsed.validRows.map((row) => row.importKey))
       : { data: [], error: null };
@@ -76,16 +85,33 @@ export async function POST(req: Request) {
 
     let databaseFailure: string | null = null;
     if (parsed.validRows.length) {
-      const upsert = await supabaseAdmin.from("message_templates").upsert(
+      const upsert = await supabaseAdmin.from("messages").upsert(
         parsed.validRows.map((row) => ({
+          package_id: "heart-core",
           import_key: row.importKey,
           title: row.title,
+          text: row.content,
           content: row.content,
           category: row.category,
-          status: row.status,
-          sort_order: row.sortOrder,
-          metadata: row.metadata,
-          published_at: row.publishedAt,
+          state: row.status,
+          is_active: row.status !== "archived",
+          is_explore_published: row.status === "published",
+          explore_sort_order: row.sortOrder,
+          is_reserve_eligible: row.reserveEligible,
+          reserve_default_approved: row.reserveDefaultApproved,
+          reserve_sort_order: row.reserveEligible
+            ? row.reserveSortOrder
+            : null,
+          theme_key: row.themeKey,
+          animation_key: row.animationKey,
+          sound_key: row.soundKey,
+          background_key: row.backgroundKey,
+          font_key: row.fontKey,
+          text_size_key: row.textSizeKey,
+          text_alignment_key: row.textAlignmentKey,
+          text_position_key: row.textPositionKey,
+          necklace_id: null,
+          author_user_id: null,
         })),
         { onConflict: "import_key" }
       );
@@ -127,8 +153,8 @@ export async function POST(req: Request) {
 
     await writeAdminAuditLog({
       adminUserId: user.id,
-      action: "message_templates.imported",
-      resourceType: "message_template_import",
+      action: "message_catalog.imported",
+      resourceType: "message_catalog_import",
       resourceId: run.data.id,
       details: { totalRows: parsed.totalRows, failedRows },
     });
