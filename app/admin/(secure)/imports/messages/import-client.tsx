@@ -61,7 +61,7 @@ export function MessageImportClient() {
     <div className="space-y-5">
       <Card>
         <h2 className="font-serif text-xl">1. Select and validate</h2>
-        <p className="mt-2 text-sm text-[#765d60]">CSV or JSON, up to 1 MB and 1,000 rows. Validation and commit both run on the server.</p>
+        <p className="mt-2 text-sm text-[#765d60]">CSV or JSON, up to 1 MB and 1,000 rows. Valid rows write directly to the Explore and Reserve catalog.</p>
         <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
           <input
             type="file"
@@ -124,4 +124,3 @@ export function MessageImportClient() {
     </div>
   );
 }
-

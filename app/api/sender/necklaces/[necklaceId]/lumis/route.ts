@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/requireUser";
 import {
   enqueueSenderLumi,
+  normalizeLumiPresentation,
+  normalizeQueueSection,
   normalizeLumiText,
   SenderApiError,
 } from "@/lib/sender/necklaces";
@@ -11,6 +13,8 @@ import { getSupabaseConnectionErrorMessage } from "@/lib/supabase/env";
 
 type CreateLumiBody = {
   text?: unknown;
+  presentation?: unknown;
+  destination?: unknown;
 };
 
 type RouteContext = {
@@ -36,9 +40,18 @@ export async function POST(req: Request, context: RouteContext) {
     }
 
     const text = normalizeLumiText(body.text);
+    const presentation = normalizeLumiPresentation(body.presentation);
+    const destination = normalizeQueueSection(body.destination ?? "up_next");
 
-    const lumi = await enqueueSenderLumi(supabaseAdmin, user.id, necklaceId, text);
-    return NextResponse.json({ lumi }, { status: 201 });
+    const result = await enqueueSenderLumi(
+      supabaseAdmin,
+      user.id,
+      necklaceId,
+      text,
+      destination,
+      presentation
+    );
+    return NextResponse.json(result, { status: 201 });
   } catch (error) {
     if (error instanceof Response) {
       return error;

@@ -11,7 +11,7 @@
     "seed:dev-user": "node --import tsx scripts/seed-dev-user.ts",
     "test:recipient-tap": "node --import tsx --test tests/recipient-tap.integration.test.ts",
     "test:reserve": "node --env-file=.env --import tsx --test --test-name-pattern=Reserve tests/recipient-tap.integration.test.ts tests/sender.integration.test.ts",
-    "test:sender": "node --env-file=.env --import tsx --test tests/sender.integration.test.ts",
+    "test:sender": "node --conditions react-server --env-file=.env --import tsx --test tests/sender.integration.test.ts",
     "test:shopify": "node --import tsx --test tests/shopify-webhook.test.ts",
     "test:admin": "node --import tsx --test tests/admin.test.ts",
     "test:message-library": "node --import tsx --test tests/message-library.test.ts",

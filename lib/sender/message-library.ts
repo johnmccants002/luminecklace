@@ -5,14 +5,18 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   decodeLibraryCursor,
   encodeLibraryCursor,
-  MESSAGE_LIBRARY_CATEGORIES,
   type MessageLibraryCategoryKey,
 } from "@/lib/sender/message-library-contract";
 import {
-  normalizeLumiText,
+  parseQueueSnapshot,
   parseRpcLumi,
   requireSenderOwnedNecklace,
+  safeTextAlignment,
+  safeTextPosition,
+  safeTextSize,
   SenderApiError,
+  type SenderQueueSection,
+  type SenderQueueSnapshot,
   type SenderLumi,
 } from "@/lib/sender/necklaces";
 
@@ -24,6 +28,11 @@ type CatalogRow = {
   theme_key: string | null;
   animation_key: string | null;
   sound_key: string | null;
+  background_key: string | null;
+  font_key: string | null;
+  text_size_key: string | null;
+  text_alignment_key: string | null;
+  text_position_key: string | null;
 };
 
 type UsageRow = {
@@ -31,6 +40,12 @@ type UsageRow = {
   is_enabled: boolean;
   revealed_at: string | null;
   created_at: string;
+};
+
+type CategoryRow = {
+  key: string;
+  name: string;
+  sort_order: number;
 };
 
 export type MessageLibraryQuery = {
@@ -50,17 +65,41 @@ export async function listSenderMessageLibrary(
     await requireSenderOwnedNecklace(client, userId, options.necklaceId);
   }
 
+  const categoriesResult = await client
+    .from("message_categories")
+    .select("key, name, sort_order")
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+    .order("name", { ascending: true });
+  if (categoriesResult.error) {
+    throw new Error("Failed to load message library categories");
+  }
+  const categories = (categoriesResult.data ?? []) as CategoryRow[];
+  const categoryByKey = new Map(
+    categories.map((category) => [category.key, category])
+  );
+  if (options.category && !categoryByKey.has(options.category)) {
+    throw new SenderApiError("category is not supported", 400);
+  }
+
   const cursor = decodeLibraryCursor(options.cursor);
+  if (cursor && !categoryByKey.has(cursor.category)) {
+    throw new SenderApiError("cursor is invalid", 400);
+  }
   if (cursor && options.category && cursor.category !== options.category) {
     throw new SenderApiError("cursor does not match category", 400);
+  }
+  if (!categories.length) {
+    return { categories: [], messages: [], nextCursor: null };
   }
   let query = client
     .from("messages")
     .select(
-      "id, text, category, explore_sort_order, theme_key, animation_key, sound_key"
+      "id, text, category, explore_sort_order, theme_key, animation_key, sound_key, background_key, font_key, text_size_key, text_alignment_key, text_position_key"
     )
     .eq("is_active", true)
     .eq("is_explore_published", true)
+    .in("category", categories.map((category) => category.key))
     .order("category", { ascending: true })
     .order("explore_sort_order", { ascending: true })
     .order("id", { ascending: true })
@@ -76,7 +115,7 @@ export async function listSenderMessageLibrary(
 
   const [messagesResult, ...categoryResults] = await Promise.all([
     query,
-    ...MESSAGE_LIBRARY_CATEGORIES.map((category) =>
+    ...categories.map((category) =>
       client
         .from("messages")
         .select("id", { count: "exact", head: true })
@@ -104,14 +143,13 @@ export async function listSenderMessageLibrary(
     usageRows = (usage.data ?? []) as UsageRow[];
   }
 
-  const categoryByKey = new Map(
-    MESSAGE_LIBRARY_CATEGORIES.map((category) => [category.key, category])
-  );
   const recentThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
   return {
-    categories: MESSAGE_LIBRARY_CATEGORIES.map((category, index) => ({
-      ...category,
+    categories: categories.map((category, index) => ({
+      key: category.key,
+      name: category.name,
+      sortOrder: category.sort_order,
       messageCount: categoryResults[index].count ?? 0,
     })),
     messages: rows.map((row) => {
@@ -131,6 +169,12 @@ export async function listSenderMessageLibrary(
           theme: row.theme_key ?? "heart",
           animation: row.animation_key ?? "breathe",
           sound: row.sound_key ?? "soft",
+          revealPreset: "wordRise",
+          background: row.background_key ?? "rose_glow",
+          font: row.font_key ?? "serif",
+          textSize: safeTextSize(row.text_size_key),
+          textAlignment: safeTextAlignment(row.text_alignment_key),
+          textPosition: safeTextPosition(row.text_position_key),
         },
         ...(options.necklaceId
           ? {
@@ -162,8 +206,8 @@ export async function enqueueSenderLibraryMessage(
   userId: string,
   necklaceId: string,
   messageId: string,
-  personalizedText?: unknown
-): Promise<SenderLumi> {
+  destination: SenderQueueSection
+): Promise<{ lumi: SenderLumi; queue: SenderQueueSnapshot }> {
   const necklace = await requireSenderOwnedNecklace(
     client,
     userId,
@@ -173,18 +217,13 @@ export async function enqueueSenderLibraryMessage(
     throw new SenderApiError("This Lumi cannot accept new messages", 409);
   }
 
-  const text =
-    personalizedText === undefined
-      ? null
-      : normalizeLumiText(personalizedText);
-
   const { data, error } = await client.rpc(
     "enqueue_library_message_for_sender",
     {
       p_user_id: userId,
       p_necklace_id: necklaceId,
       p_message_id: messageId,
-      p_personalized_content: text,
+      p_destination: destination,
     }
   );
   if (error) {
@@ -194,7 +233,24 @@ export async function enqueueSenderLibraryMessage(
     if (error.message.includes("invalid content")) {
       throw new SenderApiError("text must be between 1 and 500 characters", 400);
     }
+    if (error.message.includes("duplicate queue membership")) {
+      throw new SenderApiError("Message is already in the queue", 409);
+    }
     throw new Error(error.message);
   }
-  return parseRpcLumi(data);
+  if (!data || typeof data !== "object") {
+    throw new Error("Invalid queue response");
+  }
+  const result = data as {
+    status?: unknown;
+    lumi?: unknown;
+    queue?: unknown;
+  };
+  if (result.status !== "ok") {
+    throw new Error("Invalid queue response");
+  }
+  return {
+    lumi: parseRpcLumi(result.lumi),
+    queue: parseQueueSnapshot(result.queue),
+  };
 }

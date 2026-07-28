@@ -1,5 +1,6 @@
 -- Sender Explore Messages library. Explore publication is intentionally
 -- independent from automatic Reserve eligibility.
+create extension if not exists pg_trgm;
 
 alter table public.messages
     add column if not exists text text,
@@ -53,6 +54,10 @@ alter table public.messages
 
 create index if not exists messages_explore_catalog_idx
     on public.messages (category, explore_sort_order, id)
+    where is_active = true and is_explore_published = true;
+
+create index if not exists messages_explore_text_search_idx
+    on public.messages using gin (text gin_trgm_ops)
     where is_active = true and is_explore_published = true;
 
 alter table public.necklace_lumis

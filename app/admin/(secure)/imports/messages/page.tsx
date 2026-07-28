@@ -1,6 +1,7 @@
 import { Badge, Card, EmptyState, PageHeader, tableClass } from "@/components/admin/ui";
 import { formatDate } from "@/lib/admin/format";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import Link from "next/link";
 
 import { MessageImportClient } from "./import-client";
 
@@ -14,7 +15,15 @@ export default async function MessageImportsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Message-template imports" description="Validate and import Lumi-owned Reserve content without touching customer-private messages." />
+      <PageHeader
+        title="Message catalog imports"
+        description="Bulk-create or update the same catalog used by Explore and Reserve."
+        actions={
+          <Link href="/admin/messages" className="text-sm font-semibold text-[#b63d42]">
+            Edit catalog →
+          </Link>
+        }
+      />
       <MessageImportClient />
       <Card>
         <h2 className="mb-4 font-serif text-xl">Import history</h2>
@@ -31,9 +40,15 @@ export default async function MessageImportsPage() {
       </Card>
       <Card className="bg-[#fbf7f5]">
         <h2 className="font-semibold">Supported columns</h2>
-        <p className="mt-2 text-sm text-[#765d60]"><code>import_key,title,content,category,status,sort_order,metadata</code>. JSON uses the same keys. Status is <code>draft</code>, <code>published</code>, or <code>archived</code>; metadata must be a JSON object.</p>
+        <p className="mt-2 text-sm leading-6 text-[#765d60]">
+          <code>import_key,title,content,category,status,sort_order,background_key,font_key,text_size_key,text_alignment_key,text_position_key,metadata</code>.
+          JSON uses the same keys. Status is <code>draft</code>, <code>published</code>,
+          or <code>archived</code>. Metadata may include <code>theme</code>,
+          <code>animation</code>, <code>sound</code>, <code>background</code>,
+          <code>font</code>, <code>reserveEligible</code>,
+          <code>reserveDefaultApproved</code>, and <code>reserveSortOrder</code>.
+        </p>
       </Card>
     </div>
   );
 }
-

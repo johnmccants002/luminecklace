@@ -4,16 +4,19 @@ import test from "node:test";
 
 import { createClient } from "@supabase/supabase-js";
 
+import { PATCH as patchSenderLumi } from "../app/api/sender/necklaces/[necklaceId]/lumis/[lumiId]/route";
+import { POST as postSenderLumi } from "../app/api/sender/necklaces/[necklaceId]/lumis/route";
+import { POST as postQueueMutation } from "../app/api/sender/necklaces/[necklaceId]/queue/mutations/route";
 import {
   editSenderLumi,
   enqueueSenderLumi,
   listSenderNecklaces,
+  mutateSenderQueue,
+  normalizeLumiPresentation,
   normalizeLumiText,
   removeSenderLumi,
-  reorderSenderLumis,
   SenderApiError,
 } from "../lib/sender/necklaces";
-import { resolveNextRecipientTap } from "../lib/tap/recipient";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
@@ -135,16 +138,21 @@ async function createFixture(): Promise<Fixture> {
       author_user_id: ownerData.user.id,
       content: "First queued Lumi",
       queue_position: 1,
+      queue_section: "current",
       is_enabled: true,
       theme_key: "heart",
       animation_key: "breathe",
       sound_key: "soft",
+      text_size_key: "large",
+      text_alignment_key: "leading",
+      text_position_key: "bottom",
     },
     {
       necklace_id: primary.id,
       author_user_id: ownerData.user.id,
       content: "Second queued Lumi",
-      queue_position: 2,
+      queue_position: 1,
+      queue_section: "up_next",
       is_enabled: true,
     },
     ...Array.from({ length: 6 }, (_, index) => ({
@@ -192,6 +200,217 @@ async function cleanupFixture(fixture: Fixture) {
   ]);
 }
 
+async function ownerAccessToken(fixture: Fixture) {
+  const client = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!);
+  const { data, error } = await client.auth.signInWithPassword({
+    email: fixture.ownerEmail,
+    password: fixture.ownerPassword,
+  });
+  if (error || !data.session) {
+    throw new Error(error?.message ?? "Failed to authenticate sender fixture");
+  }
+  return data.session.access_token;
+}
+
+test("sender create and edit routes validate and atomically persist presentation", async () => {
+  const fixture = await createFixture();
+
+  try {
+    const token = await ownerAccessToken(fixture);
+    const post = (body: unknown) =>
+      postSenderLumi(
+        new Request(
+          `http://localhost/api/sender/necklaces/${fixture.secondaryNecklaceId}/lumis`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
+          }
+        ),
+        { params: Promise.resolve({ necklaceId: fixture.secondaryNecklaceId }) }
+      );
+
+    const defaultResponse = await post({ text: "Default layout payload" });
+    assert.equal(defaultResponse.status, 201);
+    const defaultBody = (await defaultResponse.json()) as {
+      lumi: { presentation: Record<string, string> };
+    };
+    assert.deepEqual(defaultBody.lumi.presentation, {
+      theme: "heart",
+      animation: "breathe",
+      sound: "soft",
+      revealPreset: "wordRise",
+      background: "rose_glow",
+      font: "serif",
+      textSize: "medium",
+      textAlignment: "center",
+      textPosition: "center",
+    });
+
+    const styledResponse = await post({
+      text: "Styled payload",
+      destination: "reserve",
+      presentation: {
+        background: "midnight",
+        font: "rounded",
+        textSize: "large",
+        textAlignment: "trailing",
+        textPosition: "bottom",
+      },
+    });
+    assert.equal(styledResponse.status, 201);
+    const styledBody = (await styledResponse.json()) as {
+      lumi: {
+        id: string;
+        presentation: {
+          background: string;
+          font: string;
+          textSize: string;
+          textAlignment: string;
+          textPosition: string;
+        };
+      };
+      queue: { revision: number; reserve: Array<{ id: string }> };
+    };
+    assert.equal(styledBody.lumi.presentation.background, "midnight");
+    assert.equal(styledBody.lumi.presentation.font, "rounded");
+    assert.equal(styledBody.lumi.presentation.textSize, "large");
+    assert.equal(styledBody.lumi.presentation.textAlignment, "trailing");
+    assert.equal(styledBody.lumi.presentation.textPosition, "bottom");
+    assert.deepEqual(
+      styledBody.queue.reserve.map((lumi) => lumi.id),
+      [styledBody.lumi.id]
+    );
+
+    assert.equal(
+      (
+        await post({
+          text: "Bad background",
+          destination: "up_next",
+          presentation: { background: "#fff" },
+        })
+      ).status,
+      400
+    );
+    assert.equal(
+      (
+        await post({
+          text: "Bad size",
+          destination: "up_next",
+          presentation: { textSize: "72px" },
+        })
+      ).status,
+      400
+    );
+    assert.equal(
+      (
+        await post({
+          text: "Bad alignment",
+          destination: "up_next",
+          presentation: { textAlignment: "justify" },
+        })
+      ).status,
+      400
+    );
+    assert.equal(
+      (
+        await post({
+          text: "Bad position",
+          destination: "up_next",
+          presentation: { textPosition: "25%" },
+        })
+      ).status,
+      400
+    );
+    assert.equal(
+      (
+        await post({
+          text: "Bad font",
+          destination: "up_next",
+          presentation: { font: "Comic Sans" },
+        })
+      ).status,
+      400
+    );
+
+    const patchResponse = await patchSenderLumi(
+      new Request(
+        `http://localhost/api/sender/necklaces/${fixture.secondaryNecklaceId}/lumis/${styledBody.lumi.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            text: "Styled and edited",
+            presentation: {
+              background: "lavender",
+              font: "typewriter",
+              textSize: "small",
+              textAlignment: "leading",
+              textPosition: "top",
+            },
+          }),
+        }
+      ),
+      {
+        params: Promise.resolve({
+          necklaceId: fixture.secondaryNecklaceId,
+          lumiId: styledBody.lumi.id,
+        }),
+      }
+    );
+    assert.equal(patchResponse.status, 200);
+    const patchBody = (await patchResponse.json()) as {
+      lumi: {
+        id: string;
+        presentation: {
+          textSize: string;
+          textAlignment: string;
+          textPosition: string;
+        };
+      };
+      queue: {
+        revision: number;
+        current: null;
+        reserve: Array<{ id: string }>;
+      };
+    };
+    assert.equal(patchBody.lumi.id, styledBody.lumi.id);
+    assert.equal(patchBody.lumi.presentation.textSize, "small");
+    assert.equal(patchBody.lumi.presentation.textAlignment, "leading");
+    assert.equal(patchBody.lumi.presentation.textPosition, "top");
+    assert.equal(
+      patchBody.queue.reserve.some((lumi) => lumi.id === styledBody.lumi.id),
+      true
+    );
+    assert.equal(patchBody.queue.current, null);
+
+    const stored = await admin
+      .from("necklace_lumis")
+      .select(
+        "content, background_key, font_key, text_size_key, text_alignment_key, text_position_key"
+      )
+      .eq("id", styledBody.lumi.id)
+      .single();
+    assert.ifError(stored.error);
+    assert.deepEqual(stored.data, {
+      content: "Styled and edited",
+      background_key: "lavender",
+      font_key: "typewriter",
+      text_size_key: "small",
+      text_alignment_key: "leading",
+      text_position_key: "top",
+    });
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
 test("sender necklace APIs scope ownership, order primary first, and enqueue safely", async () => {
   const fixture = await createFixture();
 
@@ -211,12 +430,17 @@ test("sender necklace APIs scope ownership, order primary first, and enqueue saf
     assert.equal(necklaces[0].isPrimary, true);
     assert.equal(necklaces[0].availableLumiCount, 2);
     assert.equal(necklaces[0].nextLumi?.text, "First queued Lumi");
+    assert.equal(necklaces[0].nextLumi?.presentation.background, "rose_glow");
+    assert.equal(necklaces[0].nextLumi?.presentation.font, "serif");
+    assert.equal(necklaces[0].nextLumi?.presentation.textSize, "large");
+    assert.equal(necklaces[0].nextLumi?.presentation.textAlignment, "leading");
+    assert.equal(necklaces[0].nextLumi?.presentation.textPosition, "bottom");
     assert.deepEqual(
-      necklaces[0].queue.map((lumi) => lumi.text),
-      ["First queued Lumi", "Second queued Lumi"]
+      necklaces[0].queue.upNext.map((lumi) => lumi.text),
+      ["Second queued Lumi"]
     );
-    assert.deepEqual(necklaces[0].nextLumi, necklaces[0].queue[0]);
-    assert.equal(necklaces[0].availableLumiCount, necklaces[0].queue.length);
+    assert.deepEqual(necklaces[0].nextLumi, necklaces[0].queue.current);
+    assert.equal(necklaces[0].availableLumiCount, 2);
     assert.equal(necklaces[0].reserve.enabled, true);
     assert.equal(necklaces[0].reserve.approvedCount, 18);
     assert.equal(necklaces[0].reserve.totalCount, 18);
@@ -276,6 +500,45 @@ test("sender necklace APIs scope ownership, order primary first, and enqueue saf
     assert.equal(ownerSignInError, null);
     assert.equal(otherSignInError, null);
 
+    const [browserEnqueue, browserEdit, browserLibraryEnqueue, browserResolve] =
+      await Promise.all([
+        ownerClient.rpc("enqueue_necklace_lumi_for_sender", {
+          p_user_id: fixture.ownerId,
+          p_necklace_id: fixture.primaryNecklaceId,
+          p_content: "Browser roles cannot invoke definer RPCs",
+          p_destination: "up_next",
+          p_text_size_key: "large",
+          p_text_alignment_key: "center",
+          p_text_position_key: "bottom",
+        }),
+        ownerClient.rpc("edit_necklace_lumi_for_sender", {
+          p_user_id: fixture.ownerId,
+          p_necklace_id: fixture.primaryNecklaceId,
+          p_lumi_id: necklaces[0].queue.current!.id,
+          p_content: "Forbidden browser edit",
+          p_text_size_key: "small",
+          p_text_alignment_key: "leading",
+          p_text_position_key: "top",
+        }),
+        ownerClient.rpc("enqueue_library_message_for_sender", {
+          p_user_id: fixture.ownerId,
+          p_necklace_id: fixture.primaryNecklaceId,
+          p_message_id: randomUUID(),
+          p_destination: "reserve",
+        }),
+        ownerClient.rpc("resolve_next_necklace_lumi", {
+          p_token_hash: fixture.primaryTokenHash,
+        }),
+      ]);
+    for (const result of [
+      browserEnqueue,
+      browserEdit,
+      browserLibraryEnqueue,
+      browserResolve,
+    ]) {
+      assert.ok(result.error);
+    }
+
     const [{ data: ownerReserve }, { data: otherReserve }] = await Promise.all([
       ownerClient
         .from("necklace_reserve_settings")
@@ -290,17 +553,57 @@ test("sender necklace APIs scope ownership, order primary first, and enqueue saf
     assert.equal(otherReserve?.length, 0);
 
     const [first, second] = await Promise.all([
-      enqueueSenderLumi(admin, fixture.ownerId, fixture.secondaryNecklaceId, "One"),
-      enqueueSenderLumi(admin, fixture.ownerId, fixture.secondaryNecklaceId, "Two"),
+      enqueueSenderLumi(
+        admin,
+        fixture.ownerId,
+        fixture.secondaryNecklaceId,
+        "One",
+        "up_next"
+      ),
+      enqueueSenderLumi(
+        admin,
+        fixture.ownerId,
+        fixture.secondaryNecklaceId,
+        "Two",
+        "up_next"
+      ),
     ]);
-    assert.deepEqual([first.queuePosition, second.queuePosition].sort(), [1, 2]);
+    assert.deepEqual(
+      [first.lumi.queuePosition, second.lumi.queuePosition].sort(),
+      [1, 2]
+    );
+    assert.equal(first.lumi.presentation.background, "rose_glow");
+    assert.equal(first.lumi.presentation.font, "serif");
+
+    const customized = await enqueueSenderLumi(
+      admin,
+      fixture.ownerId,
+      fixture.secondaryNecklaceId,
+      "Styled",
+      "reserve",
+      normalizeLumiPresentation({ background: "sunset", font: "modern" })
+    );
+    assert.equal(customized.lumi.presentation.background, "sunset");
+    assert.equal(customized.lumi.presentation.font, "modern");
 
     await assert.rejects(
-      enqueueSenderLumi(admin, fixture.ownerId, fixture.otherNecklaceId, "Forbidden"),
+      enqueueSenderLumi(
+        admin,
+        fixture.ownerId,
+        fixture.otherNecklaceId,
+        "Forbidden",
+        "up_next"
+      ),
       (error: unknown) => error instanceof SenderApiError && error.status === 403
     );
     await assert.rejects(
-      enqueueSenderLumi(admin, fixture.ownerId, randomUUID(), "Missing"),
+      enqueueSenderLumi(
+        admin,
+        fixture.ownerId,
+        randomUUID(),
+        "Missing",
+        "up_next"
+      ),
       (error: unknown) => error instanceof SenderApiError && error.status === 404
     );
 
@@ -317,221 +620,199 @@ test("sender necklace APIs scope ownership, order primary first, and enqueue saf
   }
 });
 
-test("sender queue reorder, edit, remove, ownership, and recipient resolve stay consistent", async () => {
+test("sender queue mutations preserve section order, revisions, and current immutability", async () => {
   const fixture = await createFixture();
 
   try {
-    assert.deepEqual(
-      await reorderSenderLumis(
-        admin,
-        fixture.ownerId,
-        fixture.secondaryNecklaceId,
-        []
-      ),
-      []
-    );
-
     const initial = await listSenderNecklaces(admin, fixture.ownerId);
     const primary = initial.find((necklace) => necklace.id === fixture.primaryNecklaceId);
     assert.ok(primary);
-    const [first, second] = primary.queue;
-    const third = await enqueueSenderLumi(
+    assert.ok(primary.queue.current);
+    const current = primary.queue.current;
+    const second = primary.queue.upNext[0];
+    const thirdResult = await enqueueSenderLumi(
       admin,
       fixture.ownerId,
       fixture.primaryNecklaceId,
-      "Third queued Lumi"
+      "Third queued Lumi",
+      "up_next",
+      normalizeLumiPresentation({
+        textSize: "large",
+        textAlignment: "trailing",
+        textPosition: "bottom",
+      })
+    );
+    const third = thirdResult.lumi;
+
+    await assert.rejects(
+      mutateSenderQueue(
+        admin,
+        fixture.ownerId,
+        fixture.primaryNecklaceId,
+        thirdResult.queue.revision,
+        randomUUID(),
+        {
+          type: "reorder",
+          section: "up_next",
+          orderedMessageIds: [third.id],
+        }
+      ),
+      (error: unknown) => error instanceof SenderApiError && error.status === 409
     );
 
-    const reordered = await reorderSenderLumis(
+    const reordered = await mutateSenderQueue(
       admin,
       fixture.ownerId,
       fixture.primaryNecklaceId,
-      [second.id, third.id, first.id]
+      thirdResult.queue.revision,
+      randomUUID(),
+      {
+        type: "reorder",
+        section: "up_next",
+        orderedMessageIds: [third.id, second.id],
+      }
     );
-    assert.deepEqual(reordered.map((lumi) => lumi.id), [second.id, third.id, first.id]);
-    assert.deepEqual(reordered.map((lumi) => lumi.queuePosition), [1, 2, 3]);
-
-    const fresh = await listSenderNecklaces(admin, fixture.ownerId);
-    const freshPrimary = fresh.find(
-      (necklace) => necklace.id === fixture.primaryNecklaceId
+    assert.equal(reordered.stale, false);
+    assert.deepEqual(
+      reordered.queue.upNext.map((lumi) => lumi.id),
+      [third.id, second.id]
     );
-    assert.deepEqual(freshPrimary?.queue.map((lumi) => lumi.id), [
-      second.id,
-      third.id,
-      first.id,
-    ]);
-
-    const resolve = await resolveNextRecipientTap(admin, fixture.primaryTokenHash);
-    assert.equal(resolve.status, "ready");
-    if (resolve.status === "ready") {
-      assert.equal(resolve.lumi.id, second.id);
-      assert.deepEqual(Object.keys(resolve).sort(), [
-        "lumi",
-        "necklace",
-        "presentation",
-        "revealSessionId",
-        "status",
-      ]);
-    }
+    assert.deepEqual(
+      reordered.queue.upNext[0].presentation,
+      third.presentation
+    );
+    assert.equal(reordered.queue.current?.id, current.id);
 
     const edited = await editSenderLumi(
       admin,
       fixture.ownerId,
       fixture.primaryNecklaceId,
-      first.id,
-      "Updated first Lumi"
+      second.id,
+      "Updated second Lumi",
+      normalizeLumiPresentation({
+        background: "ocean",
+        font: "typewriter",
+        textSize: "small",
+        textAlignment: "trailing",
+        textPosition: "top",
+      })
     );
-    assert.equal(edited.text, "Updated first Lumi");
-    assert.equal(edited.queuePosition, 3);
+    assert.equal(edited.lumi.text, "Updated second Lumi");
+    assert.equal(edited.lumi.presentation.background, "ocean");
+    assert.equal(edited.lumi.presentation.textSize, "small");
+    assert.equal(edited.lumi.presentation.textAlignment, "trailing");
+    assert.equal(edited.lumi.presentation.textPosition, "top");
+    assert.deepEqual(
+      edited.queue.upNext.find((lumi) => lumi.id === second.id)?.presentation,
+      edited.lumi.presentation
+    );
 
-    const removed = await removeSenderLumi(
+    await assert.rejects(
+      editSenderLumi(
+        admin,
+        fixture.ownerId,
+        fixture.primaryNecklaceId,
+        current.id,
+        "Current cannot change"
+      ),
+      (error: unknown) => error instanceof SenderApiError && error.status === 409
+    );
+    await assert.rejects(
+      removeSenderLumi(
+        admin,
+        fixture.ownerId,
+        fixture.primaryNecklaceId,
+        current.id
+      ),
+      (error: unknown) => error instanceof SenderApiError && error.status === 409
+    );
+
+    const moved = await mutateSenderQueue(
       admin,
       fixture.ownerId,
       fixture.primaryNecklaceId,
-      second.id
+      edited.queue.revision,
+      randomUUID(),
+      {
+        type: "move",
+        messageId: third.id,
+        section: "up_next",
+        destination: "reserve",
+        placement: "first",
+      }
     );
-    assert.equal(removed.deletedLumiId, second.id);
-    assert.deepEqual(removed.queue.map((lumi) => lumi.id), [third.id, first.id]);
-    assert.deepEqual(removed.queue.map((lumi) => lumi.queuePosition), [1, 2]);
+    assert.deepEqual(moved.queue.upNext.map((lumi) => lumi.id), [second.id]);
+    assert.deepEqual(moved.queue.reserve.map((lumi) => lumi.id), [third.id]);
 
-    await assert.rejects(
-      removeSenderLumi(
-        admin,
-        fixture.ownerId,
-        fixture.primaryNecklaceId,
-        second.id
-      ),
-      (error: unknown) => error instanceof SenderApiError && error.status === 409
+    const idempotencyKey = randomUUID();
+    const removed = await mutateSenderQueue(
+      admin,
+      fixture.ownerId,
+      fixture.primaryNecklaceId,
+      moved.queue.revision,
+      idempotencyKey,
+      { type: "remove", messageId: second.id, section: "up_next" }
     );
-    await assert.rejects(
-      editSenderLumi(
-        admin,
-        fixture.ownerId,
-        fixture.primaryNecklaceId,
-        randomUUID(),
-        "Missing"
-      ),
-      (error: unknown) => error instanceof SenderApiError && error.status === 404
+    assert.deepEqual(removed.queue.upNext, []);
+    const retry = await mutateSenderQueue(
+      admin,
+      fixture.ownerId,
+      fixture.primaryNecklaceId,
+      moved.queue.revision,
+      idempotencyKey,
+      { type: "remove", messageId: second.id, section: "up_next" }
     );
+    assert.deepEqual(retry.queue, removed.queue);
 
-    const afterRemove = await listSenderNecklaces(admin, fixture.ownerId);
-    const afterRemovePrimary = afterRemove.find(
-      (necklace) => necklace.id === fixture.primaryNecklaceId
+    const stale = await mutateSenderQueue(
+      admin,
+      fixture.ownerId,
+      fixture.primaryNecklaceId,
+      moved.queue.revision,
+      randomUUID(),
+      {
+        type: "reorder",
+        section: "reserve",
+        orderedMessageIds: [third.id],
+      }
     );
-    assert.deepEqual(afterRemovePrimary?.queue.map((lumi) => lumi.id), [
-      third.id,
-      first.id,
-    ]);
-    assert.equal(afterRemovePrimary?.queue[1].text, "Updated first Lumi");
-    assert.equal(afterRemovePrimary?.recentlyRevealed.length, 5);
+    assert.equal(stale.stale, true);
+    assert.equal(stale.queue.revision, removed.queue.revision);
 
-    const { data: revealed } = await admin
-      .from("necklace_lumis")
-      .select("id")
-      .eq("necklace_id", fixture.primaryNecklaceId)
-      .not("revealed_at", "is", null)
-      .limit(1)
-      .single();
-    assert.ok(revealed);
-
-    await assert.rejects(
-      editSenderLumi(
-        admin,
-        fixture.ownerId,
-        fixture.primaryNecklaceId,
-        revealed.id,
-        "Cannot edit"
+    const token = await ownerAccessToken(fixture);
+    const staleResponse = await postQueueMutation(
+      new Request(
+        `http://localhost/api/sender/necklaces/${fixture.primaryNecklaceId}/queue/mutations`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            expectedRevision: moved.queue.revision,
+            idempotencyKey: randomUUID(),
+            operation: {
+              type: "reorder",
+              section: "reserve",
+              orderedMessageIds: [third.id],
+            },
+          }),
+        }
       ),
-      (error: unknown) => error instanceof SenderApiError && error.status === 409
+      { params: Promise.resolve({ necklaceId: fixture.primaryNecklaceId }) }
     );
-    await assert.rejects(
-      removeSenderLumi(
-        admin,
-        fixture.ownerId,
-        fixture.primaryNecklaceId,
-        revealed.id
-      ),
-      (error: unknown) => error instanceof SenderApiError && error.status === 409
-    );
-    await assert.rejects(
-      reorderSenderLumis(admin, fixture.ownerId, fixture.primaryNecklaceId, [
-        third.id,
-        first.id,
-        revealed.id,
-      ]),
-      (error: unknown) => error instanceof SenderApiError && error.status === 409
-    );
-
-    const { data: foreignLumi, error: foreignLumiError } = await admin
-      .from("necklace_lumis")
-      .insert({
-        necklace_id: fixture.otherNecklaceId,
-        author_user_id: fixture.otherUserId,
-        content: "Foreign Lumi",
-        queue_position: 1,
-        is_enabled: true,
-      })
-      .select("id")
-      .single();
-    if (foreignLumiError || !foreignLumi) {
-      throw new Error(foreignLumiError?.message ?? "Failed to create foreign Lumi");
-    }
-
-    for (const staleIds of [[], [randomUUID()], [first.id, foreignLumi.id]]) {
-      await assert.rejects(
-        reorderSenderLumis(
-          admin,
-          fixture.ownerId,
-          fixture.primaryNecklaceId,
-          staleIds
-        ),
-        (error: unknown) => error instanceof SenderApiError && error.status === 409
-      );
-    }
-    await assert.rejects(
-      reorderSenderLumis(admin, fixture.ownerId, fixture.primaryNecklaceId, [
-        first.id,
-        first.id,
-      ]),
-      (error: unknown) => error instanceof SenderApiError && error.status === 409
-    );
-    await assert.rejects(
-      editSenderLumi(
-        admin,
-        fixture.ownerId,
-        fixture.otherNecklaceId,
-        foreignLumi.id,
-        "Forbidden"
-      ),
-      (error: unknown) => error instanceof SenderApiError && error.status === 403
-    );
-    await assert.rejects(
-      reorderSenderLumis(admin, fixture.ownerId, fixture.otherNecklaceId, [
-        foreignLumi.id,
-      ]),
-      (error: unknown) => error instanceof SenderApiError && error.status === 403
-    );
-    await assert.rejects(
-      removeSenderLumi(
-        admin,
-        fixture.ownerId,
-        fixture.otherNecklaceId,
-        foreignLumi.id
-      ),
-      (error: unknown) => error instanceof SenderApiError && error.status === 403
-    );
-    assert.equal(
-      (await listSenderNecklaces(admin, fixture.otherUserId)).some(
-        (necklace) => necklace.id === fixture.primaryNecklaceId
-      ),
-      false
-    );
+    assert.equal(staleResponse.status, 409);
+    const staleBody = (await staleResponse.json()) as {
+      queue: { revision: number };
+    };
+    assert.equal(staleBody.queue.revision, removed.queue.revision);
   } finally {
     await cleanupFixture(fixture);
   }
 });
 
-test("concurrent enqueue and reorder serialize without duplicate active positions", async () => {
+test("concurrent queue mutations allow one revision winner", async () => {
   const fixture = await createFixture();
 
   try {
@@ -539,46 +820,45 @@ test("concurrent enqueue and reorder serialize without duplicate active position
       admin,
       fixture.ownerId,
       fixture.secondaryNecklaceId,
-      "One"
+      "One",
+      "up_next"
     );
     const two = await enqueueSenderLumi(
       admin,
       fixture.ownerId,
       fixture.secondaryNecklaceId,
-      "Two"
+      "Two",
+      "up_next"
     );
-
-    const results = await Promise.allSettled([
-      enqueueSenderLumi(
+    const revision = two.queue.revision;
+    const results = await Promise.all([
+      mutateSenderQueue(
         admin,
         fixture.ownerId,
         fixture.secondaryNecklaceId,
-        "Concurrent"
+        revision,
+        randomUUID(),
+        {
+          type: "reorder",
+          section: "up_next",
+          orderedMessageIds: [two.lumi.id, one.lumi.id],
+        }
       ),
-      reorderSenderLumis(admin, fixture.ownerId, fixture.secondaryNecklaceId, [
-        two.id,
-        one.id,
-      ]),
+      mutateSenderQueue(
+        admin,
+        fixture.ownerId,
+        fixture.secondaryNecklaceId,
+        revision,
+        randomUUID(),
+        {
+          type: "reorder",
+          section: "up_next",
+          orderedMessageIds: [one.lumi.id, two.lumi.id],
+        }
+      ),
     ]);
-    assert.equal(results[0].status, "fulfilled");
-    if (results[1].status === "rejected") {
-      if (!(results[1].reason instanceof SenderApiError)) {
-        throw results[1].reason;
-      }
-      assert.equal(results[1].reason.status, 409);
-    }
-
-    const { data: rows, error } = await admin
-      .from("necklace_lumis")
-      .select("queue_position")
-      .eq("necklace_id", fixture.secondaryNecklaceId)
-      .eq("is_enabled", true)
-      .is("revealed_at", null);
-    if (error || !rows) {
-      throw new Error(error?.message ?? "Failed to read concurrent queue");
-    }
-    const positions = rows.map((row) => row.queue_position);
-    assert.equal(new Set(positions).size, positions.length);
+    assert.equal(results.filter((result) => result.stale).length, 1);
+    assert.equal(results.filter((result) => !result.stale).length, 1);
   } finally {
     await cleanupFixture(fixture);
   }

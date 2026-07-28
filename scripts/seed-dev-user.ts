@@ -113,6 +113,7 @@ type LumiRow = {
   source_message_id: string | null;
   content: string;
   queue_position: number;
+  queue_section: "current" | "up_next" | "reserve" | null;
   is_enabled: boolean;
   eligible_from?: string | null;
   revealed_at?: string | null;
@@ -499,6 +500,7 @@ async function seedDemoGraph(userId: string) {
       source_message_id: null,
       content: "You are loved more than you know.",
       queue_position: 1,
+      queue_section: "current",
       is_enabled: true,
       eligible_from: timeOffsetHours(-12),
       revealed_at: null,
@@ -514,7 +516,8 @@ async function seedDemoGraph(userId: string) {
       author_user_id: userId,
       source_message_id: null,
       content: "I'm so glad you're here.",
-      queue_position: 2,
+      queue_position: 1,
+      queue_section: "up_next",
       is_enabled: true,
       eligible_from: timeOffsetHours(-11),
       revealed_at: null,
@@ -530,7 +533,8 @@ async function seedDemoGraph(userId: string) {
       author_user_id: userId,
       source_message_id: null,
       content: "Take your time. There is no rush here.",
-      queue_position: 3,
+      queue_position: 2,
+      queue_section: "up_next",
       is_enabled: true,
       eligible_from: timeOffsetHours(24),
       revealed_at: null,
@@ -547,6 +551,7 @@ async function seedDemoGraph(userId: string) {
       source_message_id: null,
       content: "You can do this, one small step at a time.",
       queue_position: 1,
+      queue_section: "current",
       is_enabled: true,
       eligible_from: timeOffsetHours(-2),
       revealed_at: null,
@@ -562,7 +567,8 @@ async function seedDemoGraph(userId: string) {
       author_user_id: userId,
       source_message_id: null,
       content: "I'm right here with you.",
-      queue_position: 2,
+      queue_position: 1,
+      queue_section: "up_next",
       is_enabled: true,
       eligible_from: timeOffsetHours(-2),
       revealed_at: null,

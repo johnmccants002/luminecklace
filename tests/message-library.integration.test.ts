@@ -4,6 +4,8 @@ import test from "node:test";
 
 import { createClient } from "@supabase/supabase-js";
 
+import { GET as getMessageLibrary } from "../app/api/sender/message-library/route";
+import { POST as enqueueFromLibrary } from "../app/api/sender/necklaces/[necklaceId]/lumis/from-library/route";
 import {
   enqueueSenderLibraryMessage,
   listSenderMessageLibrary,
@@ -19,10 +21,91 @@ if (!supabaseUrl || !secretKey) {
 
 const admin = createClient(supabaseUrl, secretKey);
 
+test("Explore endpoints require bearer authentication", async () => {
+  const getResponse = await getMessageLibrary(
+    new Request("http://localhost/api/sender/message-library")
+  );
+  assert.equal(getResponse.status, 401);
+
+  const postResponse = await enqueueFromLibrary(
+    new Request(
+      `http://localhost/api/sender/necklaces/${randomUUID()}/lumis/from-library`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId: randomUUID() }),
+      }
+    ),
+    { params: Promise.resolve({ necklaceId: randomUUID() }) }
+  );
+  assert.equal(postResponse.status, 401);
+});
+
+test("Explore includes admin-managed categories", async (t) => {
+  const suffix = randomUUID().slice(0, 8);
+  const categoryKey = `celebration-${suffix}`;
+  const category = await admin
+    .from("message_categories")
+    .insert({
+      key: categoryKey,
+      name: `Celebration ${suffix}`,
+      sort_order: 999,
+    })
+    .select("key")
+    .single();
+  assert.ifError(category.error);
+  let messageId: string | null = null;
+  t.after(async () => {
+    if (messageId) {
+      await admin.from("messages").delete().eq("id", messageId);
+    }
+    await admin.from("message_categories").delete().eq("key", categoryKey);
+  });
+
+  const message = await admin
+    .from("messages")
+    .insert({
+      package_id: "heart-core",
+      text: `A celebration message ${suffix}`,
+      content: `A celebration message ${suffix}`,
+      is_active: true,
+      is_explore_published: true,
+      is_reserve_eligible: false,
+      reserve_default_approved: false,
+      explore_sort_order: 1,
+      category: categoryKey,
+      theme_key: "heart",
+      animation_key: "breathe",
+      sound_key: "soft",
+      background_key: "rose_glow",
+      font_key: "serif",
+    })
+    .select("id")
+    .single();
+  assert.ifError(message.error);
+  messageId = message.data.id;
+
+  const library = await listSenderMessageLibrary(admin, randomUUID(), {
+    category: categoryKey,
+    limit: 20,
+  });
+  assert.equal(
+    library.categories.some((item) => item.key === categoryKey),
+    true
+  );
+  assert.deepEqual(
+    library.messages.map((item) => item.id),
+    [message.data.id]
+  );
+  assert.equal(library.messages[0].category.name, `Celebration ${suffix}`);
+});
+
 test("Explore catalog and snapshot enqueue preserve visibility, ownership, provenance, and queue safety", async (t) => {
   const probe = await admin
     .from("messages")
-    .select("id, is_explore_published, explore_sort_order")
+    .select(
+      "id, is_explore_published, explore_sort_order, background_key, font_key, text_size_key, text_alignment_key, text_position_key"
+    )
     .limit(1);
   if (probe.error?.code === "42703" || probe.error?.code === "PGRST204") {
     t.skip("Explore Messages migration is not applied to the configured project");
@@ -68,6 +151,28 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
   assert.ifError(necklaces.error);
   assert.equal(necklaces.data.length, 2);
   const [ownedNecklace, foreignNecklace] = necklaces.data;
+  let templateIds: string[] = [];
+  t.after(async () => {
+    await admin
+      .from("necklace_lumis")
+      .delete()
+      .in("necklace_id", [ownedNecklace.id, foreignNecklace.id]);
+    if (templateIds.length) {
+      await admin.from("messages").delete().in("id", templateIds);
+    }
+    await admin
+      .from("necklace_ownerships")
+      .delete()
+      .in("necklace_id", [ownedNecklace.id, foreignNecklace.id]);
+    await admin
+      .from("necklaces")
+      .delete()
+      .in("id", [ownedNecklace.id, foreignNecklace.id]);
+    await Promise.all([
+      admin.auth.admin.deleteUser(owner.data.user.id),
+      admin.auth.admin.deleteUser(other.data.user.id),
+    ]);
+  });
   const ownership = await admin.from("necklace_ownerships").insert([
     {
       necklace_id: ownedNecklace.id,
@@ -84,6 +189,7 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
 
   const templateRows = [
     {
+      package_id: "heart-core",
       text: `${marker} I brought you a little extra courage today.`,
       content: `${marker} I brought you a little extra courage today.`,
       is_active: true,
@@ -95,8 +201,14 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
       theme_key: "rose",
       animation_key: "float",
       sound_key: "chime",
+      background_key: "midnight",
+      font_key: "rounded",
+      text_size_key: "large",
+      text_alignment_key: "trailing",
+      text_position_key: "bottom",
     },
     {
+      package_id: "heart-core",
       text: `${marker} You never have to pretend with me.`,
       content: `${marker} You never have to pretend with me.`,
       is_active: true,
@@ -108,8 +220,14 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
       theme_key: "heart",
       animation_key: "breathe",
       sound_key: "soft",
+      background_key: "rose_glow",
+      font_key: "serif",
+      text_size_key: "small",
+      text_alignment_key: "leading",
+      text_position_key: "top",
     },
     {
+      package_id: "heart-core",
       text: `${marker} reserve only`,
       content: `${marker} reserve only`,
       is_active: true,
@@ -119,8 +237,14 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
       reserve_sort_order: null,
       explore_sort_order: null,
       category: "comfort",
+      theme_key: "heart",
+      animation_key: "breathe",
+      sound_key: "soft",
+      background_key: "rose_glow",
+      font_key: "serif",
     },
     {
+      package_id: "heart-core",
       text: `${marker} inactive`,
       content: `${marker} inactive`,
       is_active: false,
@@ -129,11 +253,17 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
       reserve_default_approved: false,
       explore_sort_order: null,
       category: "comfort",
+      theme_key: "heart",
+      animation_key: "breathe",
+      sound_key: "soft",
+      background_key: "rose_glow",
+      font_key: "serif",
     },
   ];
   const templates = await admin.from("messages").insert(templateRows).select("id");
   assert.ifError(templates.error);
   assert.equal(templates.data.length, 4);
+  templateIds = templates.data.map((template) => template.id);
   const [firstTemplate, secondTemplate, reserveOnly, inactive] = templates.data;
 
   try {
@@ -151,6 +281,9 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
     assert.ok(firstPage.nextCursor);
     assert.equal(firstPage.messages[0].id, firstTemplate.id);
     assert.equal(firstPage.messages[0].isQueued, false);
+    assert.equal(firstPage.messages[0].presentation.textSize, "large");
+    assert.equal(firstPage.messages[0].presentation.textAlignment, "trailing");
+    assert.equal(firstPage.messages[0].presentation.textPosition, "bottom");
 
     const secondPage = await listSenderMessageLibrary(
       admin,
@@ -178,33 +311,61 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
       admin,
       owner.data.user.id,
       ownedNecklace.id,
-      firstTemplate.id
+      firstTemplate.id,
+      "up_next"
     );
-    assert.equal(defaultLumi.text, templateRows[0].text);
-    assert.deepEqual(defaultLumi.presentation, {
+    assert.equal(defaultLumi.lumi.text, templateRows[0].text);
+    assert.deepEqual(defaultLumi.lumi.presentation, {
       theme: "rose",
       animation: "float",
       sound: "chime",
+      revealPreset: "wordRise",
+      background: "midnight",
+      font: "rounded",
+      textSize: "large",
+      textAlignment: "trailing",
+      textPosition: "bottom",
     });
 
-    const personalized = await enqueueSenderLibraryMessage(
+    const reserveLumi = await enqueueSenderLibraryMessage(
       admin,
       owner.data.user.id,
       ownedNecklace.id,
       secondTemplate.id,
-      "  This one is just for you.  "
+      "reserve"
     );
-    assert.equal(personalized.text, "This one is just for you.");
+    assert.equal(reserveLumi.lumi.text, templateRows[1].text);
+    assert.deepEqual(defaultLumi.queue.upNext.map((lumi) => lumi.id), [
+      defaultLumi.lumi.id,
+    ]);
+    assert.deepEqual(reserveLumi.queue.reserve.map((lumi) => lumi.id), [
+      reserveLumi.lumi.id,
+    ]);
 
     const stored = await admin
       .from("necklace_lumis")
-      .select("id, source_message_id, content, theme_key, animation_key, sound_key")
-      .in("id", [defaultLumi.id, personalized.id])
+      .select(
+        "id, source_message_id, content, theme_key, animation_key, sound_key, background_key, font_key, text_size_key, text_alignment_key, text_position_key"
+      )
+      .in("id", [defaultLumi.lumi.id, reserveLumi.lumi.id])
       .order("queue_position");
     assert.ifError(stored.error);
     assert.deepEqual(
-      stored.data.map((row) => row.source_message_id),
-      [firstTemplate.id, secondTemplate.id]
+      new Set(stored.data.map((row) => row.source_message_id)),
+      new Set([firstTemplate.id, secondTemplate.id])
+    );
+    const storedDefault = stored.data.find(
+      (row) => row.source_message_id === firstTemplate.id
+    );
+    assert.deepEqual(
+      [
+        storedDefault?.background_key,
+        storedDefault?.font_key,
+        storedDefault?.text_size_key,
+        storedDefault?.text_alignment_key,
+        storedDefault?.text_position_key,
+      ],
+      ["midnight", "rounded", "large", "trailing", "bottom"]
     );
 
     await assert.rejects(
@@ -212,7 +373,8 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
         admin,
         owner.data.user.id,
         foreignNecklace.id,
-        firstTemplate.id
+        firstTemplate.id,
+        "up_next"
       ),
       (error: unknown) => error instanceof SenderApiError && error.status === 403
     );
@@ -222,7 +384,8 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
           admin,
           owner.data.user.id,
           ownedNecklace.id,
-          missingId
+          missingId,
+          "up_next"
         ),
         (error: unknown) => error instanceof SenderApiError && error.status === 404
       );
@@ -232,27 +395,17 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
         admin,
         owner.data.user.id,
         ownedNecklace.id,
-        firstTemplate.id,
-        "x".repeat(501)
+        secondTemplate.id,
+        "up_next"
       ),
-      (error: unknown) => error instanceof SenderApiError && error.status === 400
+      (error: unknown) => error instanceof SenderApiError && error.status === 409
     );
 
-    const concurrent = await Promise.all([
-      enqueueSenderLibraryMessage(
-        admin,
-        owner.data.user.id,
-        ownedNecklace.id,
-        secondTemplate.id
-      ),
-      enqueueSenderLibraryMessage(
-        admin,
-        owner.data.user.id,
-        ownedNecklace.id,
-        secondTemplate.id
-      ),
-    ]);
-    assert.equal(new Set(concurrent.map((lumi) => lumi.queuePosition)).size, 2);
+    const revealForHint = await admin
+      .from("necklace_lumis")
+      .update({ revealed_at: new Date().toISOString() })
+      .eq("id", reserveLumi.lumi.id);
+    assert.ifError(revealForHint.error);
 
     const changed = await admin
       .from("messages")
@@ -260,16 +413,28 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
         text: `${marker} edited later`,
         content: `${marker} edited later`,
         is_explore_published: false,
+        background_key: "lavender",
+        font_key: "typewriter",
+        text_size_key: "small",
+        text_alignment_key: "leading",
+        text_position_key: "top",
       })
       .eq("id", firstTemplate.id);
     assert.ifError(changed.error);
     const snapshot = await admin
       .from("necklace_lumis")
-      .select("content")
-      .eq("id", defaultLumi.id)
+      .select(
+        "content, background_key, font_key, text_size_key, text_alignment_key, text_position_key"
+      )
+      .eq("id", defaultLumi.lumi.id)
       .single();
     assert.ifError(snapshot.error);
     assert.equal(snapshot.data.content, templateRows[0].text);
+    assert.equal(snapshot.data.background_key, "midnight");
+    assert.equal(snapshot.data.font_key, "rounded");
+    assert.equal(snapshot.data.text_size_key, "large");
+    assert.equal(snapshot.data.text_alignment_key, "trailing");
+    assert.equal(snapshot.data.text_position_key, "bottom");
 
     const duplicateHints = await listSenderMessageLibrary(
       admin,
@@ -285,6 +450,7 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
       (message) => message.id === secondTemplate.id
     );
     assert.equal(used?.isQueued, true);
+    assert.equal(used?.wasRecentlyRevealed, true);
     assert.ok(used?.lastUsedAt);
   } finally {
     await admin
@@ -309,4 +475,3 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
     ]);
   }
 });
-
