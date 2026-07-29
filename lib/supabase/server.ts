@@ -13,14 +13,19 @@ export async function createSupabaseServerClient() {
 
   return createServerClient(supabaseUrl, supabasePublishableKey, {
     cookies: {
-      get(name) {
-        return cookieStore.get(name)?.value;
+      getAll() {
+        return cookieStore.getAll();
       },
-      set(name, value, options) {
-        cookieStore.set({ name, value, ...options });
-      },
-      remove(name, options) {
-        cookieStore.set({ name, value: "", ...options, maxAge: 0 });
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        } catch {
+          // Server Components cannot modify response cookies. The request
+          // proxy refreshes the session before rendering and persists any
+          // updated cookies on its response.
+        }
       },
     },
   });
