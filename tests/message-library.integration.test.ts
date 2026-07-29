@@ -77,7 +77,7 @@ test("Explore includes admin-managed categories", async (t) => {
       theme_key: "heart",
       animation_key: "breathe",
       sound_key: "soft",
-      background_key: "rose_glow",
+      background_key: "heart",
       font_key: "serif",
     })
     .select("id")
@@ -198,7 +198,7 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
       reserve_default_approved: false,
       explore_sort_order: 901,
       category: "encouragement",
-      theme_key: "rose",
+      theme_key: "midnight",
       animation_key: "float",
       sound_key: "chime",
       background_key: "midnight",
@@ -220,7 +220,7 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
       theme_key: "heart",
       animation_key: "breathe",
       sound_key: "soft",
-      background_key: "rose_glow",
+      background_key: "heart",
       font_key: "serif",
       text_size_key: "small",
       text_alignment_key: "leading",
@@ -240,7 +240,7 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
       theme_key: "heart",
       animation_key: "breathe",
       sound_key: "soft",
-      background_key: "rose_glow",
+      background_key: "heart",
       font_key: "serif",
     },
     {
@@ -256,7 +256,7 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
       theme_key: "heart",
       animation_key: "breathe",
       sound_key: "soft",
-      background_key: "rose_glow",
+      background_key: "heart",
       font_key: "serif",
     },
   ];
@@ -316,7 +316,7 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
     );
     assert.equal(defaultLumi.lumi.text, templateRows[0].text);
     assert.deepEqual(defaultLumi.lumi.presentation, {
-      theme: "rose",
+      theme: "midnight",
       animation: "float",
       sound: "chime",
       revealPreset: "wordRise",
@@ -413,8 +413,9 @@ test("Explore catalog and snapshot enqueue preserve visibility, ownership, prove
         text: `${marker} edited later`,
         content: `${marker} edited later`,
         is_explore_published: false,
-        background_key: "lavender",
-        font_key: "typewriter",
+        theme_key: "champagne",
+        background_key: "champagne",
+        font_key: "serif",
         text_size_key: "small",
         text_alignment_key: "leading",
         text_position_key: "top",

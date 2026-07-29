@@ -260,7 +260,7 @@ async function createFixture(options: {
         theme_key: lumi.theme_key ?? "heart",
         animation_key: lumi.animation_key ?? "breathe",
         sound_key: lumi.sound_key ?? "soft",
-        background_key: lumi.background_key ?? "rose_glow",
+        background_key: lumi.theme_key ?? "heart",
         font_key: lumi.font_key ?? "serif",
         text_size_key: lumi.text_size_key ?? "medium",
         text_alignment_key: lumi.text_alignment_key ?? "center",
@@ -304,6 +304,7 @@ test("resolve returns ready and leaves the lumi unrevealed until confirmed", asy
       {
         queue_position: 1,
         content: "Remember that I am always in your corner.",
+        theme_key: "midnight",
         background_key: "midnight",
         font_key: "rounded",
         text_size_key: "large",
@@ -329,7 +330,7 @@ test("resolve returns ready and leaves the lumi unrevealed until confirmed", asy
     assertReadyResolve(resolve);
     assert.equal(resolve.necklace.displayName, fixture.necklaceName);
     assert.equal(resolve.lumi.text, "Remember that I am always in your corner.");
-    assert.equal(resolve.presentation.theme, "heart");
+    assert.equal(resolve.presentation.theme, "midnight");
     assert.equal(resolve.presentation.animation, "breathe");
     assert.equal(resolve.presentation.sound, "soft");
     assert.equal(resolve.presentation.revealPreset, "wordRise");

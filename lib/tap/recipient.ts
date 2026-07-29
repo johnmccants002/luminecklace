@@ -70,11 +70,11 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function safeBackground(value: unknown): LumiBackgroundKey {
+function safeRecipientBackground(value: unknown): LumiBackgroundKey {
   return typeof value === "string" &&
     LUMI_BACKGROUND_KEYS.includes(value as LumiBackgroundKey)
     ? (value as LumiBackgroundKey)
-    : "rose_glow";
+    : "heart";
 }
 
 function safeFont(value: unknown): LumiFontKey {
@@ -121,6 +121,9 @@ export async function resolveNextRecipientTap(
     }
 
     const presentation = data.presentation ?? {};
+    const background = safeRecipientBackground(
+      presentation.theme ?? presentation.background
+    );
 
     return {
       status: "ready",
@@ -135,7 +138,7 @@ export async function resolveNextRecipientTap(
         text: data.lumi_text,
       },
       presentation: {
-        theme: isNonEmptyString(presentation.theme) ? presentation.theme : "heart",
+        theme: background,
         animation: isNonEmptyString(presentation.animation)
           ? presentation.animation
           : "breathe",
@@ -143,7 +146,7 @@ export async function resolveNextRecipientTap(
         revealPreset: isNonEmptyString(presentation.revealPreset)
           ? presentation.revealPreset
           : "wordRise",
-        background: safeBackground(presentation.background),
+        background,
         font: safeFont(presentation.font),
         textSize: safeTextSize(presentation.textSize),
         textAlignment: safeTextAlignment(presentation.textAlignment),

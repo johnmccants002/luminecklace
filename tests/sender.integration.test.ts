@@ -243,7 +243,7 @@ test("sender create and edit routes validate and atomically persist presentation
       animation: "breathe",
       sound: "soft",
       revealPreset: "wordRise",
-      background: "rose_glow",
+      background: "heart",
       font: "serif",
       textSize: "medium",
       textAlignment: "center",
@@ -348,8 +348,8 @@ test("sender create and edit routes validate and atomically persist presentation
           body: JSON.stringify({
             text: "Styled and edited",
             presentation: {
-              background: "lavender",
-              font: "typewriter",
+              background: "rose",
+              font: "serif",
               textSize: "small",
               textAlignment: "leading",
               textPosition: "top",
@@ -393,19 +393,52 @@ test("sender create and edit routes validate and atomically persist presentation
     const stored = await admin
       .from("necklace_lumis")
       .select(
-        "content, background_key, font_key, text_size_key, text_alignment_key, text_position_key"
+        "content, theme_key, background_key, font_key, text_size_key, text_alignment_key, text_position_key"
       )
       .eq("id", styledBody.lumi.id)
       .single();
     assert.ifError(stored.error);
     assert.deepEqual(stored.data, {
       content: "Styled and edited",
-      background_key: "lavender",
-      font_key: "typewriter",
+      theme_key: "rose",
+      background_key: "rose",
+      font_key: "serif",
       text_size_key: "small",
       text_alignment_key: "leading",
       text_position_key: "top",
     });
+
+    const textOnlyResponse = await patchSenderLumi(
+      new Request(
+        `http://localhost/api/sender/necklaces/${fixture.secondaryNecklaceId}/lumis/${styledBody.lumi.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ text: "Text-only edit" }),
+        }
+      ),
+      {
+        params: Promise.resolve({
+          necklaceId: fixture.secondaryNecklaceId,
+          lumiId: styledBody.lumi.id,
+        }),
+      }
+    );
+    assert.equal(textOnlyResponse.status, 200);
+    const textOnlyBody = (await textOnlyResponse.json()) as {
+      lumi: {
+        text: string;
+        presentation: Record<string, string>;
+      };
+    };
+    assert.equal(textOnlyBody.lumi.text, "Text-only edit");
+    assert.deepEqual(
+      textOnlyBody.lumi.presentation,
+      patchBody.lumi.presentation
+    );
   } finally {
     await cleanupFixture(fixture);
   }
@@ -430,7 +463,7 @@ test("sender necklace APIs scope ownership, order primary first, and enqueue saf
     assert.equal(necklaces[0].isPrimary, true);
     assert.equal(necklaces[0].availableLumiCount, 2);
     assert.equal(necklaces[0].nextLumi?.text, "First queued Lumi");
-    assert.equal(necklaces[0].nextLumi?.presentation.background, "rose_glow");
+    assert.equal(necklaces[0].nextLumi?.presentation.background, "heart");
     assert.equal(necklaces[0].nextLumi?.presentation.font, "serif");
     assert.equal(necklaces[0].nextLumi?.presentation.textSize, "large");
     assert.equal(necklaces[0].nextLumi?.presentation.textAlignment, "leading");
@@ -572,7 +605,7 @@ test("sender necklace APIs scope ownership, order primary first, and enqueue saf
       [first.lumi.queuePosition, second.lumi.queuePosition].sort(),
       [1, 2]
     );
-    assert.equal(first.lumi.presentation.background, "rose_glow");
+    assert.equal(first.lumi.presentation.background, "heart");
     assert.equal(first.lumi.presentation.font, "serif");
 
     const customized = await enqueueSenderLumi(
@@ -581,10 +614,10 @@ test("sender necklace APIs scope ownership, order primary first, and enqueue saf
       fixture.secondaryNecklaceId,
       "Styled",
       "reserve",
-      normalizeLumiPresentation({ background: "sunset", font: "modern" })
+      normalizeLumiPresentation({ background: "champagne", font: "rounded" })
     );
-    assert.equal(customized.lumi.presentation.background, "sunset");
-    assert.equal(customized.lumi.presentation.font, "modern");
+    assert.equal(customized.lumi.presentation.background, "champagne");
+    assert.equal(customized.lumi.presentation.font, "rounded");
 
     await assert.rejects(
       enqueueSenderLumi(
@@ -690,15 +723,15 @@ test("sender queue mutations preserve section order, revisions, and current immu
       second.id,
       "Updated second Lumi",
       normalizeLumiPresentation({
-        background: "ocean",
-        font: "typewriter",
+        background: "rose",
+        font: "serif",
         textSize: "small",
         textAlignment: "trailing",
         textPosition: "top",
       })
     );
     assert.equal(edited.lumi.text, "Updated second Lumi");
-    assert.equal(edited.lumi.presentation.background, "ocean");
+    assert.equal(edited.lumi.presentation.background, "rose");
     assert.equal(edited.lumi.presentation.textSize, "small");
     assert.equal(edited.lumi.presentation.textAlignment, "trailing");
     assert.equal(edited.lumi.presentation.textPosition, "top");

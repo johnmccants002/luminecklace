@@ -11,6 +11,7 @@ import {
 } from "../lib/sender/message-library-contract";
 import {
   normalizeLumiPresentation,
+  normalizeLumiPresentationPatch,
   parseRpcLumi,
   SenderApiError,
 } from "../lib/sender/necklaces";
@@ -47,7 +48,7 @@ test("message-library cursor is opaque, stable, and validated", () => {
 
 test("Lumi presentation defaults and preset allowlists are strict", () => {
   assert.deepEqual(normalizeLumiPresentation(undefined), {
-    background: "rose_glow",
+    background: "heart",
     font: "serif",
     textSize: "medium",
     textAlignment: "center",
@@ -96,9 +97,17 @@ test("Lumi presentation defaults and preset allowlists are strict", () => {
       /font/.test(error.message)
   );
   assert.throws(
-    () => normalizeLumiPresentation({ background: "ocean", css: "color:red" }),
-    (error: unknown) => error instanceof SenderApiError && error.status === 400
+    () => normalizeLumiPresentation({ background: "rose", css: "color:red" }),
+    (error: unknown) =>
+      error instanceof SenderApiError &&
+      error.status === 400 &&
+      error.message === "presentation.css is not supported"
   );
+  assert.deepEqual(
+    normalizeLumiPresentationPatch({ textPosition: "top" }),
+    { textPosition: "top" }
+  );
+  assert.deepEqual(normalizeLumiPresentationPatch(undefined), {});
 });
 
 test("older Lumi RPC records map missing layout values to safe defaults", () => {
@@ -106,9 +115,11 @@ test("older Lumi RPC records map missing layout values to safe defaults", () => 
     id: randomUUID(),
     content: "Older snapshot",
     queue_position: 1,
-    background_key: "rose_glow",
+    theme_key: "legacy-unknown",
     font_key: "serif",
   });
+  assert.equal(lumi.presentation.background, "heart");
+  assert.equal(lumi.presentation.theme, "heart");
   assert.equal(lumi.presentation.textSize, "medium");
   assert.equal(lumi.presentation.textAlignment, "center");
   assert.equal(lumi.presentation.textPosition, "center");

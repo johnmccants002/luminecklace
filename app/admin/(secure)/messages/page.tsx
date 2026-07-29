@@ -242,7 +242,7 @@ export default async function AdminMessagesPage({
                         <p className="text-xs text-[#8d7376]">R {message.reserve_sort_order ?? "—"}</p>
                       </td>
                       <td className="text-xs">
-                        {message.theme_key ?? "heart"} · {message.animation_key ?? "breathe"} · {message.sound_key ?? "soft"} · {message.background_key ?? "rose_glow"} · {message.font_key ?? "serif"} · {message.text_size_key ?? "medium"} · {message.text_alignment_key ?? "center"} · {message.text_position_key ?? "center"}
+                        {message.theme_key ?? "heart"} · {message.animation_key ?? "breathe"} · {message.sound_key ?? "soft"} · {message.font_key ?? "serif"} · {message.text_size_key ?? "medium"} · {message.text_alignment_key ?? "center"} · {message.text_position_key ?? "center"}
                       </td>
                       <td>
                         <Link

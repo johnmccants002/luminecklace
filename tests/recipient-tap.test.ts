@@ -18,7 +18,7 @@ test("recipient ready mapping returns stored presentation and safe preset defaul
       lumi_id: "lumi-id",
       lumi_text: "Hello",
       presentation: {
-        theme: "heart",
+        theme: "midnight",
         animation: "breathe",
         sound: "soft",
         revealPreset: "wordRise",
@@ -58,7 +58,8 @@ test("recipient ready mapping returns stored presentation and safe preset defaul
   );
   assert.equal(incomplete.status, "ready");
   if (incomplete.status === "ready") {
-    assert.equal(incomplete.presentation.background, "rose_glow");
+    assert.equal(incomplete.presentation.background, "heart");
+    assert.equal(incomplete.presentation.theme, "heart");
     assert.equal(incomplete.presentation.font, "serif");
     assert.equal(incomplete.presentation.revealPreset, "wordRise");
     assert.equal(incomplete.presentation.textSize, "medium");
