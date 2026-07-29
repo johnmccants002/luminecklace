@@ -26,10 +26,50 @@ where text_size_key is null
    or text_alignment_key is null
    or text_position_key is null;
 
+-- Normalize presentation values introduced by the earlier, broader preset
+-- experiment before enforcing the fixed mobile presentation contract.
+update public.necklace_lumis
+set theme_key = case
+        when theme_key in ('heart', 'champagne', 'rose', 'midnight')
+            then theme_key
+        else 'heart'
+    end,
+    background_key = case
+        when theme_key in ('heart', 'champagne', 'rose', 'midnight')
+            then theme_key
+        else 'heart'
+    end,
+    font_key = case
+        when font_key in ('serif', 'rounded') then font_key
+        else 'serif'
+    end;
+
+update public.messages
+set theme_key = case
+        when theme_key in ('heart', 'champagne', 'rose', 'midnight')
+            then theme_key
+        else 'heart'
+    end,
+    background_key = case
+        when theme_key in ('heart', 'champagne', 'rose', 'midnight')
+            then theme_key
+        else 'heart'
+    end,
+    font_key = case
+        when font_key in ('serif', 'rounded') then font_key
+        else 'serif'
+    end;
+
 alter table public.necklace_lumis
+    drop constraint if exists necklace_lumis_theme_key_check,
+    drop constraint if exists necklace_lumis_font_key_check,
     drop constraint if exists necklace_lumis_text_size_key_check,
     drop constraint if exists necklace_lumis_text_alignment_key_check,
     drop constraint if exists necklace_lumis_text_position_key_check,
+    add constraint necklace_lumis_theme_key_check
+        check (theme_key in ('heart', 'champagne', 'rose', 'midnight')),
+    add constraint necklace_lumis_font_key_check
+        check (font_key in ('serif', 'rounded')),
     add constraint necklace_lumis_text_size_key_check
         check (text_size_key in ('small', 'medium', 'large')),
     add constraint necklace_lumis_text_alignment_key_check
@@ -38,9 +78,15 @@ alter table public.necklace_lumis
         check (text_position_key in ('top', 'center', 'bottom'));
 
 alter table public.messages
+    drop constraint if exists messages_theme_key_check,
+    drop constraint if exists messages_font_key_check,
     drop constraint if exists messages_text_size_key_check,
     drop constraint if exists messages_text_alignment_key_check,
     drop constraint if exists messages_text_position_key_check,
+    add constraint messages_theme_key_check
+        check (theme_key in ('heart', 'champagne', 'rose', 'midnight')),
+    add constraint messages_font_key_check
+        check (font_key in ('serif', 'rounded')),
     add constraint messages_text_size_key_check
         check (text_size_key in ('small', 'medium', 'large')),
     add constraint messages_text_alignment_key_check
@@ -61,11 +107,25 @@ as $$
         'id', p_lumi.id,
         'content', p_lumi.content,
         'queue_position', p_lumi.queue_position,
-        'theme_key', coalesce(p_lumi.theme_key, p_fallback_theme, 'heart'),
+        'theme_key', case
+            when coalesce(p_lumi.theme_key, p_fallback_theme) in
+                ('heart', 'champagne', 'rose', 'midnight')
+                then coalesce(p_lumi.theme_key, p_fallback_theme)
+            else 'heart'
+        end,
         'animation_key', coalesce(p_lumi.animation_key, 'breathe'),
         'sound_key', coalesce(p_lumi.sound_key, 'soft'),
-        'background_key', coalesce(p_lumi.background_key, 'rose_glow'),
-        'font_key', coalesce(p_lumi.font_key, 'serif'),
+        'background_key', case
+            when coalesce(p_lumi.theme_key, p_fallback_theme) in
+                ('heart', 'champagne', 'rose', 'midnight')
+                then coalesce(p_lumi.theme_key, p_fallback_theme)
+            else 'heart'
+        end,
+        'font_key', case
+            when p_lumi.font_key in ('serif', 'rounded')
+                then p_lumi.font_key
+            else 'serif'
+        end,
         'text_size_key', coalesce(p_lumi.text_size_key, 'medium'),
         'text_alignment_key', coalesce(p_lumi.text_alignment_key, 'center'),
         'text_position_key', coalesce(p_lumi.text_position_key, 'center')
@@ -86,12 +146,26 @@ as $$
         'text', p_lumi.content,
         'queuePosition', p_lumi.queue_position,
         'presentation', jsonb_build_object(
-            'theme', coalesce(p_lumi.theme_key, p_fallback_theme, 'heart'),
+            'theme', case
+                when coalesce(p_lumi.theme_key, p_fallback_theme) in
+                    ('heart', 'champagne', 'rose', 'midnight')
+                    then coalesce(p_lumi.theme_key, p_fallback_theme)
+                else 'heart'
+            end,
             'animation', coalesce(p_lumi.animation_key, 'breathe'),
             'sound', coalesce(p_lumi.sound_key, 'soft'),
             'revealPreset', 'wordRise',
-            'background', coalesce(p_lumi.background_key, 'rose_glow'),
-            'font', coalesce(p_lumi.font_key, 'serif'),
+            'background', case
+                when coalesce(p_lumi.theme_key, p_fallback_theme) in
+                    ('heart', 'champagne', 'rose', 'midnight')
+                    then coalesce(p_lumi.theme_key, p_fallback_theme)
+                else 'heart'
+            end,
+            'font', case
+                when p_lumi.font_key in ('serif', 'rounded')
+                    then p_lumi.font_key
+                else 'serif'
+            end,
             'textSize', coalesce(p_lumi.text_size_key, 'medium'),
             'textAlignment', coalesce(p_lumi.text_alignment_key, 'center'),
             'textPosition', coalesce(p_lumi.text_position_key, 'center')
@@ -130,7 +204,7 @@ create function public.enqueue_necklace_lumi_for_sender(
     p_theme_key text default null,
     p_animation_key text default null,
     p_sound_key text default null,
-    p_background_key text default 'rose_glow',
+    p_background_key text default 'heart',
     p_font_key text default 'serif',
     p_text_size_key text default 'medium',
     p_text_alignment_key text default 'center',
@@ -157,10 +231,10 @@ begin
        or length(trim(p_content)) > 500 then
         raise exception 'invalid content';
     end if;
-    if coalesce(p_background_key, 'rose_glow') not in (
-        'rose_glow', 'midnight', 'champagne', 'sunset', 'ocean', 'lavender'
+    if coalesce(p_background_key, 'heart') not in (
+        'heart', 'champagne', 'rose', 'midnight'
     ) or coalesce(p_font_key, 'serif') not in (
-        'serif', 'rounded', 'modern', 'typewriter'
+        'serif', 'rounded'
     ) or coalesce(p_text_size_key, 'medium') not in (
         'small', 'medium', 'large'
     ) or coalesce(p_text_alignment_key, 'center') not in (
@@ -235,10 +309,10 @@ begin
         v_position,
         p_destination,
         true,
-        coalesce(nullif(trim(p_theme_key), ''), v_necklace.theme_key, 'heart'),
+        coalesce(p_background_key, 'heart'),
         coalesce(nullif(trim(p_animation_key), ''), 'breathe'),
         coalesce(nullif(trim(p_sound_key), ''), 'soft'),
-        coalesce(p_background_key, 'rose_glow'),
+        coalesce(p_background_key, 'heart'),
         coalesce(p_font_key, 'serif'),
         coalesce(p_text_size_key, 'medium'),
         coalesce(p_text_alignment_key, 'center'),
@@ -292,7 +366,7 @@ begin
         v_message.theme_key,
         v_message.animation_key,
         v_message.sound_key,
-        v_message.background_key,
+        v_message.theme_key,
         v_message.font_key,
         v_message.text_size_key,
         v_message.text_alignment_key,
@@ -323,12 +397,12 @@ create function public.edit_necklace_lumi_for_sender(
     p_user_id uuid,
     p_necklace_id uuid,
     p_lumi_id uuid,
-    p_content text,
-    p_background_key text default 'rose_glow',
-    p_font_key text default 'serif',
-    p_text_size_key text default 'medium',
-    p_text_alignment_key text default 'center',
-    p_text_position_key text default 'center'
+    p_content text default null,
+    p_background_key text default null,
+    p_font_key text default null,
+    p_text_size_key text default null,
+    p_text_alignment_key text default null,
+    p_text_position_key text default null
 )
 returns jsonb
 language plpgsql
@@ -339,22 +413,22 @@ declare
     v_necklace public.necklaces%rowtype;
     v_lumi public.necklace_lumis%rowtype;
 begin
-    if p_content is null
-       or length(trim(p_content)) = 0
-       or length(trim(p_content)) > 500 then
+    if p_content is not null and (
+       length(trim(p_content)) = 0
+       or length(trim(p_content)) > 500) then
         raise exception 'invalid content';
     end if;
-    if coalesce(p_background_key, 'rose_glow') not in (
-        'rose_glow', 'midnight', 'champagne', 'sunset', 'ocean', 'lavender'
-    ) or coalesce(p_font_key, 'serif') not in (
-        'serif', 'rounded', 'modern', 'typewriter'
-    ) or coalesce(p_text_size_key, 'medium') not in (
+    if (p_background_key is not null and p_background_key not in (
+        'heart', 'champagne', 'rose', 'midnight'
+    )) or (p_font_key is not null and p_font_key not in (
+        'serif', 'rounded'
+    )) or (p_text_size_key is not null and p_text_size_key not in (
         'small', 'medium', 'large'
-    ) or coalesce(p_text_alignment_key, 'center') not in (
+    )) or (p_text_alignment_key is not null and p_text_alignment_key not in (
         'leading', 'center', 'trailing'
-    ) or coalesce(p_text_position_key, 'center') not in (
+    )) or (p_text_position_key is not null and p_text_position_key not in (
         'top', 'center', 'bottom'
-    ) then
+    )) then
         raise exception 'invalid presentation';
     end if;
 
@@ -382,12 +456,16 @@ begin
     if not found then return jsonb_build_object('status', 'conflict'); end if;
 
     update public.necklace_lumis
-    set content = trim(p_content),
-        background_key = coalesce(p_background_key, 'rose_glow'),
-        font_key = coalesce(p_font_key, 'serif'),
-        text_size_key = coalesce(p_text_size_key, 'medium'),
-        text_alignment_key = coalesce(p_text_alignment_key, 'center'),
-        text_position_key = coalesce(p_text_position_key, 'center')
+    set content = coalesce(trim(p_content), content),
+        theme_key = coalesce(p_background_key, theme_key),
+        background_key = coalesce(p_background_key, theme_key),
+        font_key = coalesce(p_font_key, font_key),
+        text_size_key = coalesce(p_text_size_key, text_size_key),
+        text_alignment_key = coalesce(
+            p_text_alignment_key,
+            text_alignment_key
+        ),
+        text_position_key = coalesce(p_text_position_key, text_position_key)
     where id = p_lumi_id
     returning * into v_lumi;
 
@@ -434,6 +512,8 @@ declare
     v_session public.lumi_reveal_sessions%rowtype;
     v_lumi public.necklace_lumis%rowtype;
     v_message public.messages%rowtype;
+    v_background text := 'heart';
+    v_font text := 'serif';
     v_text_size text := 'medium';
     v_text_alignment text := 'center';
     v_text_position text := 'center';
@@ -452,6 +532,17 @@ begin
         from public.necklace_lumis l
         where l.id = v_session.necklace_lumi_id;
         if found then
+            v_background := case
+                when v_lumi.theme_key in
+                    ('heart', 'champagne', 'rose', 'midnight')
+                    then v_lumi.theme_key
+                else 'heart'
+            end;
+            v_font := case
+                when v_lumi.font_key in ('serif', 'rounded')
+                    then v_lumi.font_key
+                else 'serif'
+            end;
             v_text_size := coalesce(v_lumi.text_size_key, 'medium');
             v_text_alignment :=
                 coalesce(v_lumi.text_alignment_key, 'center');
@@ -462,6 +553,17 @@ begin
         from public.messages m
         where m.id = v_session.reserve_message_id;
         if found then
+            v_background := case
+                when v_message.theme_key in
+                    ('heart', 'champagne', 'rose', 'midnight')
+                    then v_message.theme_key
+                else 'heart'
+            end;
+            v_font := case
+                when v_message.font_key in ('serif', 'rounded')
+                    then v_message.font_key
+                else 'serif'
+            end;
             v_text_size := coalesce(v_message.text_size_key, 'medium');
             v_text_alignment :=
                 coalesce(v_message.text_alignment_key, 'center');
@@ -469,6 +571,24 @@ begin
         end if;
     end if;
 
+    v_result := jsonb_set(
+        v_result,
+        '{presentation,theme}',
+        to_jsonb(v_background),
+        true
+    );
+    v_result := jsonb_set(
+        v_result,
+        '{presentation,background}',
+        to_jsonb(v_background),
+        true
+    );
+    v_result := jsonb_set(
+        v_result,
+        '{presentation,font}',
+        to_jsonb(v_font),
+        true
+    );
     v_result := jsonb_set(
         v_result,
         '{presentation,textSize}',

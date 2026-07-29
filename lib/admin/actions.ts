@@ -122,7 +122,7 @@ export async function saveCatalogMessage(
       reserve_sort_order: input.isReserveEligible
         ? input.reserveSortOrder
         : null,
-      theme_key: input.themeKey,
+      theme_key: input.backgroundKey,
       animation_key: input.animationKey,
       sound_key: input.soundKey,
       background_key: input.backgroundKey,

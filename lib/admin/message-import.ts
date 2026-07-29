@@ -192,7 +192,7 @@ export function parseMessageTemplateImport(
     const backgroundKey =
       textValue(row, "background", "background_key", "backgroundKey") ||
       textValue(metadata, "background", "backgroundKey") ||
-      DEFAULT_LUMI_PRESENTATION.background;
+      themeKey;
     const fontKey =
       textValue(row, "font", "font_key", "fontKey") ||
       textValue(metadata, "font", "fontKey") ||
@@ -285,7 +285,7 @@ export function parseMessageTemplateImport(
       status: statusValue as TemplateImportRow["status"],
       sortOrder,
       metadata,
-      themeKey,
+      themeKey: backgroundKey as LumiBackgroundKey,
       animationKey,
       soundKey,
       backgroundKey: backgroundKey as LumiBackgroundKey,

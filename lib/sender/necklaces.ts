@@ -109,19 +109,12 @@ export type SenderQueueMutation =
     };
 
 export const LUMI_BACKGROUND_KEYS = [
-  "rose_glow",
-  "midnight",
+  "heart",
   "champagne",
-  "sunset",
-  "ocean",
-  "lavender",
+  "rose",
+  "midnight",
 ] as const;
-export const LUMI_FONT_KEYS = [
-  "serif",
-  "rounded",
-  "modern",
-  "typewriter",
-] as const;
+export const LUMI_FONT_KEYS = ["serif", "rounded"] as const;
 export const LUMI_TEXT_SIZE_KEYS = ["small", "medium", "large"] as const;
 export const LUMI_TEXT_ALIGNMENT_KEYS = [
   "leading",
@@ -143,23 +136,24 @@ export type NormalizedLumiPresentation = {
   textAlignment: LumiTextAlignmentKey;
   textPosition: LumiTextPositionKey;
 };
+export type LumiPresentationPatch = Partial<NormalizedLumiPresentation>;
 
 export const DEFAULT_LUMI_PRESENTATION: NormalizedLumiPresentation = {
-  background: "rose_glow",
+  background: "heart",
   font: "serif",
   textSize: "medium",
   textAlignment: "center",
   textPosition: "center",
 };
 
-function safeBackground(value: unknown): LumiBackgroundKey {
+export function safeBackground(value: unknown): LumiBackgroundKey {
   return typeof value === "string" &&
     LUMI_BACKGROUND_KEYS.includes(value as LumiBackgroundKey)
     ? (value as LumiBackgroundKey)
     : DEFAULT_LUMI_PRESENTATION.background;
 }
 
-function safeFont(value: unknown): LumiFontKey {
+export function safeFont(value: unknown): LumiFontKey {
   return typeof value === "string" &&
     LUMI_FONT_KEYS.includes(value as LumiFontKey)
     ? (value as LumiFontKey)
@@ -284,8 +278,24 @@ export function normalizeQueueSection(value: unknown): SenderQueueSection {
 export function normalizeLumiPresentation(
   value: unknown
 ): NormalizedLumiPresentation {
+  return normalizeLumiPresentationInput(
+    value,
+    false
+  ) as NormalizedLumiPresentation;
+}
+
+export function normalizeLumiPresentationPatch(
+  value: unknown
+): LumiPresentationPatch {
+  return normalizeLumiPresentationInput(value, true);
+}
+
+function normalizeLumiPresentationInput(
+  value: unknown,
+  partial: boolean
+): LumiPresentationPatch {
   if (value === undefined) {
-    return DEFAULT_LUMI_PRESENTATION;
+    return partial ? {} : DEFAULT_LUMI_PRESENTATION;
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new SenderApiError("presentation must be an object", 400);
@@ -301,52 +311,69 @@ export function normalizeLumiPresentation(
       key !== "textPosition"
   );
   if (unsupportedKeys.length > 0) {
-    throw new SenderApiError("presentation contains unsupported fields", 400);
+    throw new SenderApiError(
+      `presentation.${unsupportedKeys[0]} is not supported`,
+      400
+    );
   }
 
   const background =
     presentation.background === undefined
-      ? DEFAULT_LUMI_PRESENTATION.background
+      ? partial
+        ? undefined
+        : DEFAULT_LUMI_PRESENTATION.background
       : presentation.background;
   const font =
     presentation.font === undefined
-      ? DEFAULT_LUMI_PRESENTATION.font
+      ? partial
+        ? undefined
+        : DEFAULT_LUMI_PRESENTATION.font
       : presentation.font;
   const textSize =
     presentation.textSize === undefined
-      ? DEFAULT_LUMI_PRESENTATION.textSize
+      ? partial
+        ? undefined
+        : DEFAULT_LUMI_PRESENTATION.textSize
       : presentation.textSize;
   const textAlignment =
     presentation.textAlignment === undefined
-      ? DEFAULT_LUMI_PRESENTATION.textAlignment
+      ? partial
+        ? undefined
+        : DEFAULT_LUMI_PRESENTATION.textAlignment
       : presentation.textAlignment;
   const textPosition =
     presentation.textPosition === undefined
-      ? DEFAULT_LUMI_PRESENTATION.textPosition
+      ? partial
+        ? undefined
+        : DEFAULT_LUMI_PRESENTATION.textPosition
       : presentation.textPosition;
   if (
-    typeof background !== "string" ||
-    !LUMI_BACKGROUND_KEYS.includes(background as LumiBackgroundKey)
+    background !== undefined &&
+    (typeof background !== "string" ||
+      !LUMI_BACKGROUND_KEYS.includes(background as LumiBackgroundKey))
   ) {
     throw new SenderApiError("presentation.background is not supported", 400);
   }
   if (
-    typeof font !== "string" ||
-    !LUMI_FONT_KEYS.includes(font as LumiFontKey)
+    font !== undefined &&
+    (typeof font !== "string" ||
+      !LUMI_FONT_KEYS.includes(font as LumiFontKey))
   ) {
     throw new SenderApiError("presentation.font is not supported", 400);
   }
   if (
-    typeof textSize !== "string" ||
-    !LUMI_TEXT_SIZE_KEYS.includes(textSize as LumiTextSizeKey)
+    textSize !== undefined &&
+    (typeof textSize !== "string" ||
+      !LUMI_TEXT_SIZE_KEYS.includes(textSize as LumiTextSizeKey))
   ) {
     throw new SenderApiError("presentation.textSize is not supported", 400);
   }
   if (
-    typeof textAlignment !== "string" ||
-    !LUMI_TEXT_ALIGNMENT_KEYS.includes(
-      textAlignment as LumiTextAlignmentKey
-    )
+    textAlignment !== undefined &&
+    (typeof textAlignment !== "string" ||
+      !LUMI_TEXT_ALIGNMENT_KEYS.includes(
+        textAlignment as LumiTextAlignmentKey
+      ))
   ) {
     throw new SenderApiError(
       "presentation.textAlignment is not supported",
@@ -354,8 +381,9 @@ export function normalizeLumiPresentation(
     );
   }
   if (
-    typeof textPosition !== "string" ||
-    !LUMI_TEXT_POSITION_KEYS.includes(textPosition as LumiTextPositionKey)
+    textPosition !== undefined &&
+    (typeof textPosition !== "string" ||
+      !LUMI_TEXT_POSITION_KEYS.includes(textPosition as LumiTextPositionKey))
   ) {
     throw new SenderApiError(
       "presentation.textPosition is not supported",
@@ -363,26 +391,29 @@ export function normalizeLumiPresentation(
     );
   }
 
-  return {
-    background: background as LumiBackgroundKey,
-    font: font as LumiFontKey,
-    textSize: textSize as LumiTextSizeKey,
-    textAlignment: textAlignment as LumiTextAlignmentKey,
-    textPosition: textPosition as LumiTextPositionKey,
-  };
+  return Object.fromEntries(
+    Object.entries({
+      background,
+      font,
+      textSize,
+      textAlignment,
+      textPosition,
+    }).filter(([, fieldValue]) => fieldValue !== undefined)
+  ) as LumiPresentationPatch;
 }
 
 function mapLumi(row: LumiRow, fallbackTheme: string): SenderLumi {
+  const background = safeBackground(row.theme_key ?? fallbackTheme);
   return {
     id: row.id,
     text: row.content,
     queuePosition: row.queue_position,
     presentation: {
-      theme: row.theme_key ?? fallbackTheme,
+      theme: background,
       animation: row.animation_key ?? "breathe",
       sound: row.sound_key ?? "soft",
       revealPreset: "wordRise",
-      background: safeBackground(row.background_key),
+      background,
       font: safeFont(row.font_key),
       textSize: safeTextSize(row.text_size_key),
       textAlignment: safeTextAlignment(row.text_alignment_key),
@@ -618,43 +649,44 @@ export function parseRpcLumi(value: unknown): SenderLumi {
     id: result.id,
     text,
     queuePosition: queuePosition ?? 1,
-    presentation: {
-      theme:
-        typeof presentation?.theme === "string"
-          ? presentation.theme
-          : typeof result.theme_key === "string"
-            ? result.theme_key
-            : "heart",
-      animation:
-        typeof presentation?.animation === "string"
-          ? presentation.animation
-          : typeof result.animation_key === "string"
-            ? result.animation_key
-            : "breathe",
-      sound:
-        typeof presentation?.sound === "string"
-          ? presentation.sound
-          : typeof result.sound_key === "string"
-            ? result.sound_key
-            : "soft",
-      revealPreset:
-        typeof presentation?.revealPreset === "string"
-          ? presentation.revealPreset
-          : "wordRise",
-      background: safeBackground(
-        presentation?.background ?? result.background_key
-      ),
-      font: safeFont(presentation?.font ?? result.font_key),
-      textSize: safeTextSize(
-        presentation?.textSize ?? result.text_size_key
-      ),
-      textAlignment: safeTextAlignment(
-        presentation?.textAlignment ?? result.text_alignment_key
-      ),
-      textPosition: safeTextPosition(
-        presentation?.textPosition ?? result.text_position_key
-      ),
-    },
+    presentation: (() => {
+      const background = safeBackground(
+        result.theme_key ??
+          presentation?.theme ??
+          presentation?.background ??
+          result.background_key
+      );
+      return {
+        theme: background,
+        animation:
+          typeof presentation?.animation === "string"
+            ? presentation.animation
+            : typeof result.animation_key === "string"
+              ? result.animation_key
+              : "breathe",
+        sound:
+          typeof presentation?.sound === "string"
+            ? presentation.sound
+            : typeof result.sound_key === "string"
+              ? result.sound_key
+              : "soft",
+        revealPreset:
+          typeof presentation?.revealPreset === "string"
+            ? presentation.revealPreset
+            : "wordRise",
+        background,
+        font: safeFont(presentation?.font ?? result.font_key),
+        textSize: safeTextSize(
+          presentation?.textSize ?? result.text_size_key
+        ),
+        textAlignment: safeTextAlignment(
+          presentation?.textAlignment ?? result.text_alignment_key
+        ),
+        textPosition: safeTextPosition(
+          presentation?.textPosition ?? result.text_position_key
+        ),
+      };
+    })(),
   };
 }
 
@@ -774,19 +806,19 @@ export async function editSenderLumi(
   userId: string,
   necklaceId: string,
   lumiId: string,
-  text: string,
-  presentation: NormalizedLumiPresentation = DEFAULT_LUMI_PRESENTATION
+  text: string | undefined,
+  presentation: LumiPresentationPatch = {}
 ): Promise<{ lumi: SenderLumi; queue: SenderQueueSnapshot }> {
   const result = await callQueueRpc(client, "edit_necklace_lumi_for_sender", {
     p_user_id: userId,
     p_necklace_id: necklaceId,
     p_lumi_id: lumiId,
-    p_content: text,
-    p_background_key: presentation.background,
-    p_font_key: presentation.font,
-    p_text_size_key: presentation.textSize,
-    p_text_alignment_key: presentation.textAlignment,
-    p_text_position_key: presentation.textPosition,
+    p_content: text ?? null,
+    p_background_key: presentation.background ?? null,
+    p_font_key: presentation.font ?? null,
+    p_text_size_key: presentation.textSize ?? null,
+    p_text_alignment_key: presentation.textAlignment ?? null,
+    p_text_position_key: presentation.textPosition ?? null,
   });
   if (result.status !== "ok") {
     throwRpcStatus(result.status);

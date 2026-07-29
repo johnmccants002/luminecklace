@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth/requireUser";
 import {
   editSenderLumi,
-  normalizeLumiPresentation,
+  normalizeLumiPresentationPatch,
   normalizeLumiText,
   removeSenderLumi,
   SenderApiError,
@@ -64,9 +64,21 @@ export async function PATCH(req: Request, context: RouteContext) {
     } catch {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
+    if (
+      !body ||
+      typeof body !== "object" ||
+      Array.isArray(body) ||
+      Object.keys(body).some((key) => !["text", "presentation"].includes(key))
+    ) {
+      throw new SenderApiError("body contains unsupported fields", 400);
+    }
+    if (body.text === undefined && body.presentation === undefined) {
+      throw new SenderApiError("text or presentation is required", 400);
+    }
 
-    const text = normalizeLumiText(body.text);
-    const presentation = normalizeLumiPresentation(body.presentation);
+    const text =
+      body.text === undefined ? undefined : normalizeLumiText(body.text);
+    const presentation = normalizeLumiPresentationPatch(body.presentation);
     const result = await editSenderLumi(
       supabaseAdmin,
       user.id,

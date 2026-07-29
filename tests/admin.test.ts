@@ -31,7 +31,7 @@ test("message-catalog CSV dry run validates, maps, and identifies duplicates", (
   assert.equal(parsed.validRows[0].importKey, "welcome-1");
   assert.deepEqual(parsed.validRows[0].metadata, { theme: "rose" });
   assert.equal(parsed.validRows[0].themeKey, "rose");
-  assert.equal(parsed.validRows[0].backgroundKey, "rose_glow");
+  assert.equal(parsed.validRows[0].backgroundKey, "rose");
   assert.equal(parsed.validRows[0].fontKey, "serif");
   assert.equal(parsed.validRows[0].textSizeKey, "medium");
   assert.equal(parsed.validRows[0].textAlignmentKey, "center");
@@ -47,7 +47,7 @@ test("message imports validate background and font as row-level preset errors", 
       "import_key,title,content,category,status,sort_order,background_key,font_key",
       "valid,Valid,Hello,affection,published,1,midnight,rounded",
       "bad-background,Bad,Hello,comfort,draft,2,https://example.com/bg,serif",
-      "bad-font,Bad,Hello,presence,draft,3,ocean,Comic Sans",
+      "bad-font,Bad,Hello,presence,draft,3,rose,Comic Sans",
     ].join("\n"),
     "csv"
   );

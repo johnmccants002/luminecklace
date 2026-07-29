@@ -263,10 +263,6 @@ export function MessageEditorForm({
         <legend className="text-sm font-semibold">Presentation defaults</legend>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <div>
-            <label htmlFor="theme-key" className="mb-1 block text-xs text-[#765d60]">Theme</label>
-            <input id="theme-key" name="themeKey" defaultValue={message.theme_key ?? "heart"} className={fieldClass} />
-          </div>
-          <div>
             <label htmlFor="animation-key" className="mb-1 block text-xs text-[#765d60]">Animation</label>
             <input id="animation-key" name="animationKey" defaultValue={message.animation_key ?? "breathe"} className={fieldClass} />
           </div>
@@ -276,13 +272,11 @@ export function MessageEditorForm({
           </div>
           <div>
             <label htmlFor="background-key" className="mb-1 block text-xs text-[#765d60]">Background</label>
-            <select id="background-key" name="backgroundKey" defaultValue={message.background_key ?? "rose_glow"} className={fieldClass}>
-              <option value="rose_glow">Rose glow</option>
+            <select id="background-key" name="backgroundKey" defaultValue={message.theme_key ?? "heart"} className={fieldClass}>
+              <option value="heart">Heart</option>
+              <option value="rose">Rose</option>
               <option value="midnight">Midnight</option>
               <option value="champagne">Champagne</option>
-              <option value="sunset">Sunset</option>
-              <option value="ocean">Ocean</option>
-              <option value="lavender">Lavender</option>
             </select>
           </div>
           <div>
@@ -290,8 +284,6 @@ export function MessageEditorForm({
             <select id="font-key" name="fontKey" defaultValue={message.font_key ?? "serif"} className={fieldClass}>
               <option value="serif">Serif</option>
               <option value="rounded">Rounded</option>
-              <option value="modern">Modern</option>
-              <option value="typewriter">Typewriter</option>
             </select>
           </div>
           <div>
