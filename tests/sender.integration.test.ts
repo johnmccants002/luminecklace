@@ -6,6 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 
 import { PATCH as patchSenderLumi } from "../app/api/sender/necklaces/[necklaceId]/lumis/[lumiId]/route";
 import { POST as postSenderLumi } from "../app/api/sender/necklaces/[necklaceId]/lumis/route";
+import { POST as postSharedLumi } from "../app/api/sender/necklaces/[necklaceId]/lumis/from-share/route";
 import { POST as postQueueMutation } from "../app/api/sender/necklaces/[necklaceId]/queue/mutations/route";
 import {
   editSenderLumi,
@@ -154,6 +155,12 @@ async function createFixture(): Promise<Fixture> {
       queue_position: 1,
       queue_section: "up_next",
       is_enabled: true,
+      theme_key: "heart",
+      animation_key: "breathe",
+      sound_key: "soft",
+      text_size_key: "medium",
+      text_alignment_key: "center",
+      text_position_key: "center",
     },
     ...Array.from({ length: 6 }, (_, index) => ({
       necklace_id: primary.id,
@@ -162,6 +169,12 @@ async function createFixture(): Promise<Fixture> {
       queue_position: index + 3,
       is_enabled: true,
       revealed_at: new Date(revealedBase + index * 1_000).toISOString(),
+      theme_key: "heart",
+      animation_key: "breathe",
+      sound_key: "soft",
+      text_size_key: "medium",
+      text_alignment_key: "center",
+      text_position_key: "center",
     })),
   ]);
 
@@ -210,6 +223,49 @@ async function ownerAccessToken(fixture: Fixture) {
     throw new Error(error?.message ?? "Failed to authenticate sender fixture");
   }
   return data.session.access_token;
+}
+
+async function otherAccessToken(fixture: Fixture) {
+  const client = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!);
+  const { data, error } = await client.auth.signInWithPassword({
+    email: fixture.otherEmail,
+    password: fixture.otherPassword,
+  });
+  if (error || !data.session) {
+    throw new Error(error?.message ?? "Failed to authenticate other fixture");
+  }
+  return data.session.access_token;
+}
+
+async function hasSharedLinkSchema() {
+  const { error } = await admin
+    .from("necklace_lumis")
+    .select(
+      "client_request_id, external_url, external_provider, external_content_kind"
+    )
+    .limit(1);
+  return !error;
+}
+
+function sharedLumiRequest(
+  necklaceId: string,
+  token: string,
+  body: unknown
+) {
+  return postSharedLumi(
+    new Request(
+      `http://localhost/api/sender/necklaces/${necklaceId}/lumis/from-share`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      }
+    ),
+    { params: Promise.resolve({ necklaceId }) }
+  );
 }
 
 test("sender create and edit routes validate and atomically persist presentation", async () => {
@@ -892,6 +948,185 @@ test("concurrent queue mutations allow one revision winner", async () => {
     ]);
     assert.equal(results.filter((result) => result.stale).length, 1);
     assert.equal(results.filter((result) => !result.stale).length, 1);
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test("Share to Lumi creates, replays, and preserves Instagram attachments", async () => {
+  if (!(await hasSharedLinkSchema())) {
+    console.log("[sender] shared-link migration not found; skipping live assertions.");
+    return;
+  }
+  const fixture = await createFixture();
+
+  try {
+    const [token, otherToken] = await Promise.all([
+      ownerAccessToken(fixture),
+      otherAccessToken(fixture),
+    ]);
+    const clientRequestId = randomUUID();
+    const payload = {
+      clientRequestId,
+      url: "https://www.instagram.com/reel/example/?igsh=private&utm_source=share",
+    };
+
+    assert.equal(
+      (
+        await sharedLumiRequest(fixture.secondaryNecklaceId, token, {
+          ...payload,
+          preview: { title: "Untrusted metadata" },
+        })
+      ).status,
+      400
+    );
+    assert.equal(
+      (
+        await sharedLumiRequest(fixture.secondaryNecklaceId, token, {
+          ...payload,
+          url: "https://instagram.com.attacker.example/reel/example/",
+        })
+      ).status,
+      400
+    );
+
+    const createdResponse = await sharedLumiRequest(
+      fixture.secondaryNecklaceId,
+      token,
+      payload
+    );
+    assert.equal(createdResponse.status, 201);
+    const created = (await createdResponse.json()) as {
+      lumi: {
+        id: string;
+        text: string;
+        attachment: {
+          contentKind: string;
+          url: string;
+          provider: string;
+        };
+      };
+      queue: {
+        revision: number;
+        upNext: Array<{ id: string; attachment?: object }>;
+        reserve: Array<{ id: string; attachment?: object }>;
+      };
+      idempotentReplay: boolean;
+    };
+    assert.equal(created.idempotentReplay, false);
+    assert.equal(created.lumi.text, "This made me think of you.");
+    assert.deepEqual(created.lumi.attachment, {
+      type: "link",
+      provider: "instagram",
+      contentKind: "reel",
+      url: "https://instagram.com/reel/example/",
+      host: "instagram.com",
+      ctaLabel: "View on Instagram",
+      openMode: "external",
+    });
+    assert.equal(created.queue.upNext[0].id, created.lumi.id);
+    assert.deepEqual(created.queue.upNext[0].attachment, created.lumi.attachment);
+
+    const replayResponse = await sharedLumiRequest(
+      fixture.secondaryNecklaceId,
+      token,
+      payload
+    );
+    assert.equal(replayResponse.status, 200);
+    const replay = (await replayResponse.json()) as typeof created;
+    assert.equal(replay.idempotentReplay, true);
+    assert.equal(replay.lumi.id, created.lumi.id);
+    assert.equal(replay.queue.revision, created.queue.revision);
+
+    const [{ count }, revision] = await Promise.all([
+      admin
+        .from("necklace_lumis")
+        .select("id", { count: "exact", head: true })
+        .eq("author_user_id", fixture.ownerId)
+        .eq("client_request_id", clientRequestId),
+      admin
+        .from("necklaces")
+        .select("queue_revision")
+        .eq("id", fixture.secondaryNecklaceId)
+        .single(),
+    ]);
+    assert.equal(count, 1);
+    assert.ifError(revision.error);
+    assert.equal(revision.data.queue_revision, created.queue.revision);
+
+    assert.equal(
+      (
+        await sharedLumiRequest(fixture.secondaryNecklaceId, token, {
+          ...payload,
+          url: "https://instagram.com/p/different/",
+        })
+      ).status,
+      409
+    );
+    assert.equal(
+      (
+        await sharedLumiRequest(fixture.primaryNecklaceId, otherToken, {
+          ...payload,
+          clientRequestId: randomUUID(),
+        })
+      ).status,
+      403
+    );
+
+    const reserveResponse = await sharedLumiRequest(
+      fixture.secondaryNecklaceId,
+      token,
+      {
+        clientRequestId: randomUUID(),
+        url: "https://instagram.com/p/post-id/",
+        text: "Custom text",
+        destination: "reserve",
+        presentation: {
+          background: "midnight",
+          font: "rounded",
+          textSize: "large",
+          textAlignment: "trailing",
+          textPosition: "bottom",
+        },
+      }
+    );
+    assert.equal(reserveResponse.status, 201);
+    const reserve = (await reserveResponse.json()) as typeof created;
+    assert.equal(reserve.lumi.text, "Custom text");
+    assert.equal(reserve.queue.reserve[0].id, reserve.lumi.id);
+
+    const moved = await mutateSenderQueue(
+      admin,
+      fixture.ownerId,
+      fixture.secondaryNecklaceId,
+      reserve.queue.revision,
+      randomUUID(),
+      {
+        type: "move",
+        messageId: reserve.lumi.id,
+        section: "reserve",
+        destination: "up_next",
+        placement: "last",
+      }
+    );
+    assert.deepEqual(
+      moved.queue.upNext.find((lumi) => lumi.id === reserve.lumi.id)?.attachment,
+      reserve.lumi.attachment
+    );
+
+    await admin
+      .from("necklaces")
+      .update({ lifecycle_status: "inactive" })
+      .eq("id", fixture.secondaryNecklaceId);
+    assert.equal(
+      (
+        await sharedLumiRequest(fixture.secondaryNecklaceId, token, {
+          ...payload,
+          clientRequestId: randomUUID(),
+        })
+      ).status,
+      409
+    );
   } finally {
     await cleanupFixture(fixture);
   }

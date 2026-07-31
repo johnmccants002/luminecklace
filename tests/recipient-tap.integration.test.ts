@@ -27,6 +27,15 @@ type ResolveResponse =
         textAlignment: "leading" | "center" | "trailing";
         textPosition: "top" | "center" | "bottom";
       };
+      attachment?: {
+        type: "link";
+        provider: "instagram";
+        contentKind: "post" | "reel" | "story" | "profile" | "instagram_link";
+        url: string;
+        host: "instagram.com";
+        ctaLabel: "View on Instagram";
+        openMode: "external";
+      };
     }
   | { status: "empty" }
   | { status: "unavailable" }
@@ -161,6 +170,16 @@ async function hasRecipientSchema(): Promise<boolean> {
   );
 }
 
+async function hasSharedLinkSchema(): Promise<boolean> {
+  const { error } = await admin
+    .from("necklace_lumis")
+    .select(
+      "client_request_id, client_request_fingerprint, external_url, external_provider, external_content_kind"
+    )
+    .limit(1);
+  return !error;
+}
+
 const recipientSchemaReadyPromise = hasRecipientSchema();
 
 async function skipIfRecipientSchemaMissing() {
@@ -188,6 +207,11 @@ async function createFixture(options: {
     text_size_key?: string | null;
     text_alignment_key?: string | null;
     text_position_key?: string | null;
+    client_request_id?: string | null;
+    client_request_fingerprint?: string | null;
+    external_url?: string | null;
+    external_provider?: string | null;
+    external_content_kind?: string | null;
   }>;
 }) {
   const lifecycleStatus = options.lifecycleStatus ?? "active";
@@ -265,6 +289,15 @@ async function createFixture(options: {
         text_size_key: lumi.text_size_key ?? "medium",
         text_alignment_key: lumi.text_alignment_key ?? "center",
         text_position_key: lumi.text_position_key ?? "center",
+        ...(lumi.external_url
+          ? {
+              client_request_id: lumi.client_request_id,
+              client_request_fingerprint: lumi.client_request_fingerprint,
+              external_url: lumi.external_url,
+              external_provider: lumi.external_provider,
+              external_content_kind: lumi.external_content_kind,
+            }
+          : {}),
       }))
     );
 
@@ -898,6 +931,63 @@ test("repeated promoted Reserve resolve and confirmation are idempotent", async 
     assert.equal(rows?.filter((row) => row.revealed_at !== null).length, 2);
     assert.equal(rows?.some((row) => row.queue_section !== null), false);
     assert.equal(events?.length, 1);
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test("recipient resolve binds an Instagram attachment to the reveal session", async () => {
+  if ((await skipIfRecipientSchemaMissing()) || !(await hasSharedLinkSchema())) {
+    console.log("[recipient-tap] shared-link migration not found; skipping live assertions.");
+    return;
+  }
+
+  const fixture = await createFixture({
+    lumis: [
+      {
+        queue_position: 1,
+        content: "This made me think of you.",
+        client_request_id: randomUUID(),
+        client_request_fingerprint: "a".repeat(64),
+        external_url: "https://instagram.com/reel/example/",
+        external_provider: "instagram",
+        external_content_kind: "reel",
+      },
+      {
+        queue_position: 2,
+        content: "Plain promoted Lumi",
+      },
+    ],
+  });
+
+  try {
+    const first = await callResolve(fixture.rawToken);
+    assertReadyResolve(first);
+    assert.deepEqual(first.attachment, {
+      type: "link",
+      provider: "instagram",
+      contentKind: "reel",
+      url: "https://instagram.com/reel/example/",
+      host: "instagram.com",
+      ctaLabel: "View on Instagram",
+      openMode: "external",
+    });
+    assert.deepEqual(await callResolve(fixture.rawToken), first);
+
+    const beforeReveal = await admin
+      .from("necklace_lumis")
+      .select("revealed_at")
+      .eq("id", first.lumi.id)
+      .single();
+    assert.ifError(beforeReveal.error);
+    assert.equal(beforeReveal.data.revealed_at, null);
+
+    const confirmation = await callRevealed(first.revealSessionId);
+    assertSuccessfulReveal(confirmation);
+    const promoted = await callResolve(fixture.rawToken);
+    assertReadyResolve(promoted);
+    assert.equal(promoted.lumi.text, "Plain promoted Lumi");
+    assert.equal("attachment" in promoted, false);
   } finally {
     await cleanupFixture(fixture);
   }

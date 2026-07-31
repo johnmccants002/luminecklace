@@ -204,6 +204,77 @@ npm run test:recipient-tap
 Supabase-backed integration tests require the environment variables above and
 the latest migrations applied.
 
+## Share to Lumi: Instagram links
+
+The backend accepts an Instagram link as an immutable attachment on a normal
+queued Lumi:
+
+```text
+POST /api/sender/necklaces/<necklaceId>/lumis/from-share
+Authorization: Bearer <supabase-access-token>
+Content-Type: application/json
+```
+
+Example request:
+
+```json
+{
+  "clientRequestId": "00000000-0000-4000-8000-000000000000",
+  "url": "https://www.instagram.com/reel/example/?igsh=tracking",
+  "text": "This made me think of you.",
+  "destination": "up_next",
+  "presentation": {
+    "background": "heart",
+    "font": "serif",
+    "textSize": "medium",
+    "textAlignment": "center",
+    "textPosition": "center"
+  }
+}
+```
+
+`clientRequestId` is required. The first successful request returns `201`;
+an identical retry returns the same Lumi with `200` and
+`"idempotentReplay": true`. Reusing the ID with a different necklace, URL,
+text, destination, or presentation returns `409`. Blank or omitted text uses
+`This made me think of you.`, and the destination defaults to `up_next`.
+`reserve` is also supported.
+
+The response uses the existing queue snapshot and adds this object only to
+link-backed Lumis:
+
+```json
+{
+  "attachment": {
+    "type": "link",
+    "provider": "instagram",
+    "contentKind": "reel",
+    "url": "https://instagram.com/reel/example/",
+    "host": "instagram.com",
+    "ctaLabel": "View on Instagram",
+    "openMode": "external"
+  }
+}
+```
+
+Posts (`/p/`), Reels (`/reel/` and legacy `/tv/`), Stories, profiles, and
+other valid paths on `instagram.com` are supported. The backend stores only a
+normalized HTTPS URL. It removes common tracking parameters and fragments; it
+does not call Instagram APIs, scrape pages, download media, or generate
+previews. Private or expired content may therefore be unavailable to the
+recipient. The iOS client opens the returned HTTPS URL, allowing Instagram
+Universal Links to select the app or website.
+
+Apply `20260731120000_share_to_lumi_instagram.sql` with the other Supabase
+migrations. No Instagram credentials or new environment variables are
+required.
+
+Shared-link checks:
+
+```bash
+npm run test:shared-links
+```
+
 ### Explicitly deferred
 
 Refund/cancellation mutations, unit voiding, billing changes, arbitrary

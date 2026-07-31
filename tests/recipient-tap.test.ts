@@ -81,3 +81,61 @@ test("recipient ready mapping rejects missing required reveal data", async () =>
     /Failed to resolve necklace/
   );
 });
+
+test("recipient ready mapping includes a valid Instagram attachment", async () => {
+  const response = await resolveNextRecipientTap(
+    rpcResult({
+      status: "ready",
+      reveal_session_id: "session-id",
+      necklace_display_name: "Lumi",
+      lumi_id: "lumi-id",
+      lumi_text: "This made me think of you.",
+      presentation: {},
+      attachment: {
+        type: "link",
+        provider: "instagram",
+        contentKind: "reel",
+        url: "https://instagram.com/reel/ABC/",
+        host: "instagram.com",
+        ctaLabel: "View on Instagram",
+        openMode: "external",
+      },
+    }),
+    "token"
+  );
+
+  assert.equal(response.status, "ready");
+  if (response.status === "ready") {
+    assert.deepEqual(response.attachment, {
+      type: "link",
+      provider: "instagram",
+      contentKind: "reel",
+      url: "https://instagram.com/reel/ABC/",
+      host: "instagram.com",
+      ctaLabel: "View on Instagram",
+      openMode: "external",
+    });
+  }
+});
+
+test("text-only recipient mapping preserves the exact response shape", async () => {
+  const response = await resolveNextRecipientTap(
+    rpcResult({
+      status: "ready",
+      reveal_session_id: "session-id",
+      lumi_id: "lumi-id",
+      lumi_text: "Hello",
+      presentation: {},
+    }),
+    "token"
+  );
+
+  assert.equal(response.status, "ready");
+  assert.deepEqual(Object.keys(response).sort(), [
+    "lumi",
+    "necklace",
+    "presentation",
+    "revealSessionId",
+    "status",
+  ]);
+});
