@@ -3,6 +3,10 @@ import {
   listSenderReserveSummaries,
   type SenderReserveSummary,
 } from "@/lib/sender/reserve";
+import type {
+  InstagramContentKind,
+  NormalizedInstagramLink,
+} from "@/lib/shared-links/instagram";
 
 type OwnershipRow = {
   necklace_id: string;
@@ -33,6 +37,9 @@ type LumiRow = {
   text_size_key: string | null;
   text_alignment_key: string | null;
   text_position_key: string | null;
+  external_url?: string | null;
+  external_provider?: string | null;
+  external_content_kind?: string | null;
   created_at?: string;
   revealed_at?: string | null;
 };
@@ -52,6 +59,7 @@ type EnqueueRpcResult = {
   text_alignment_key?: unknown;
   text_position_key?: unknown;
   presentation?: unknown;
+  attachment?: unknown;
 };
 
 type QueueRpcResult = {
@@ -78,6 +86,17 @@ export type SenderLumi = {
   text: string;
   queuePosition: number;
   presentation: LumiPresentation;
+  attachment?: LumiLinkAttachment;
+};
+
+export type LumiLinkAttachment = {
+  type: "link";
+  provider: "instagram";
+  contentKind: InstagramContentKind;
+  url: string;
+  host: "instagram.com";
+  ctaLabel: "View on Instagram";
+  openMode: "external";
 };
 
 export type SenderQueueSection = "up_next" | "reserve";
@@ -186,6 +205,7 @@ export type RevealedLumi = {
   text: string;
   revealedAt: string;
   presentation: SenderLumi["presentation"];
+  attachment?: LumiLinkAttachment;
 };
 
 export type SenderNecklace = {
@@ -263,6 +283,18 @@ export function normalizeLumiText(value: unknown): string {
     throw new SenderApiError("text must be 500 characters or fewer", 400);
   }
   return text;
+}
+
+export const DEFAULT_SHARED_LUMI_TEXT = "This made me think of you.";
+
+export function normalizeSharedLumiText(value: unknown): string {
+  if (value === undefined || (typeof value === "string" && !value.trim())) {
+    return DEFAULT_SHARED_LUMI_TEXT;
+  }
+  if (typeof value !== "string") {
+    throw new SenderApiError("text must be a string", 400);
+  }
+  return normalizeLumiText(value);
 }
 
 export function normalizeQueueSection(value: unknown): SenderQueueSection {
@@ -404,7 +436,7 @@ function normalizeLumiPresentationInput(
 
 function mapLumi(row: LumiRow, fallbackTheme: string): SenderLumi {
   const background = safeBackground(row.theme_key ?? fallbackTheme);
-  return {
+  const lumi: SenderLumi = {
     id: row.id,
     text: row.content,
     queuePosition: row.queue_position,
@@ -420,6 +452,13 @@ function mapLumi(row: LumiRow, fallbackTheme: string): SenderLumi {
       textPosition: safeTextPosition(row.text_position_key),
     },
   };
+  const attachment = mapLinkAttachment({
+    provider: row.external_provider,
+    contentKind: row.external_content_kind,
+    url: row.external_url,
+  });
+  if (attachment) lumi.attachment = attachment;
+  return lumi;
 }
 
 function mapRevealedLumi(row: LumiRow, fallbackTheme: string): RevealedLumi {
@@ -428,12 +467,14 @@ function mapRevealedLumi(row: LumiRow, fallbackTheme: string): RevealedLumi {
   }
 
   const lumi = mapLumi(row, fallbackTheme);
-  return {
+  const revealed: RevealedLumi = {
     id: lumi.id,
     text: lumi.text,
     revealedAt: row.revealed_at,
     presentation: lumi.presentation,
   };
+  if (lumi.attachment) revealed.attachment = lumi.attachment;
+  return revealed;
 }
 
 function compareQueueRows(left: LumiRow, right: LumiRow) {
@@ -527,7 +568,7 @@ export async function listSenderNecklaces(
       client
         .from("necklace_lumis")
         .select(
-          "id, necklace_id, content, queue_position, queue_section, theme_key, animation_key, sound_key, background_key, font_key, text_size_key, text_alignment_key, text_position_key, created_at"
+          "id, necklace_id, content, queue_position, queue_section, theme_key, animation_key, sound_key, background_key, font_key, text_size_key, text_alignment_key, text_position_key, external_url, external_provider, external_content_kind, created_at"
         )
         .in("necklace_id", necklaceIds)
         .eq("is_enabled", true)
@@ -538,7 +579,7 @@ export async function listSenderNecklaces(
       client
         .from("necklace_lumis")
         .select(
-          "id, necklace_id, content, queue_position, theme_key, animation_key, sound_key, background_key, font_key, text_size_key, text_alignment_key, text_position_key, revealed_at"
+          "id, necklace_id, content, queue_position, theme_key, animation_key, sound_key, background_key, font_key, text_size_key, text_alignment_key, text_position_key, external_url, external_provider, external_content_kind, revealed_at"
         )
         .in("necklace_id", necklaceIds)
         .not("revealed_at", "is", null)
@@ -645,7 +686,7 @@ export function parseRpcLumi(value: unknown): SenderLumi {
       ? (result.presentation as Record<string, unknown>)
       : null;
 
-  return {
+  const lumi: SenderLumi = {
     id: result.id,
     text,
     queuePosition: queuePosition ?? 1,
@@ -687,6 +728,41 @@ export function parseRpcLumi(value: unknown): SenderLumi {
         ),
       };
     })(),
+  };
+  const attachment =
+    result.attachment &&
+    typeof result.attachment === "object" &&
+    !Array.isArray(result.attachment)
+      ? mapLinkAttachment(result.attachment as Record<string, unknown>)
+      : undefined;
+  if (attachment) lumi.attachment = attachment;
+  return lumi;
+}
+
+function mapLinkAttachment(value: {
+  provider?: unknown;
+  contentKind?: unknown;
+  url?: unknown;
+}): LumiLinkAttachment | undefined {
+  if (
+    value.provider !== "instagram" ||
+    typeof value.url !== "string" ||
+    !value.url.startsWith("https://instagram.com/") ||
+    typeof value.contentKind !== "string" ||
+    !["post", "reel", "story", "profile", "instagram_link"].includes(
+      value.contentKind
+    )
+  ) {
+    return undefined;
+  }
+  return {
+    type: "link",
+    provider: "instagram",
+    contentKind: value.contentKind as InstagramContentKind,
+    url: value.url,
+    host: "instagram.com",
+    ctaLabel: "View on Instagram",
+    openMode: "external",
   };
 }
 
@@ -896,5 +972,63 @@ export async function enqueueSenderLumi(
   return {
     lumi: parseRpcLumi(result.lumi),
     queue: parseQueueSnapshot(result.queue),
+  };
+}
+
+export async function enqueueSharedInstagramLumi(
+  client: SupabaseClient,
+  userId: string,
+  necklaceId: string,
+  clientRequestId: string,
+  link: NormalizedInstagramLink,
+  text: string,
+  destination: SenderQueueSection,
+  presentation: NormalizedLumiPresentation = DEFAULT_LUMI_PRESENTATION
+): Promise<{
+  lumi: SenderLumi;
+  queue: SenderQueueSnapshot;
+  idempotentReplay: boolean;
+}> {
+  const necklace = await requireSenderOwnedNecklace(client, userId, necklaceId);
+  if (!["active", "pending_sender_setup"].includes(necklace.lifecycleStatus)) {
+    throw new SenderApiError("This Lumi cannot accept new messages", 409);
+  }
+
+  const result = await callQueueRpc(
+    client,
+    "enqueue_shared_necklace_lumi_for_sender",
+    {
+      p_user_id: userId,
+      p_necklace_id: necklaceId,
+      p_client_request_id: clientRequestId,
+      p_content: text,
+      p_destination: destination,
+      p_external_url: link.url,
+      p_external_provider: link.provider,
+      p_external_content_kind: link.contentKind,
+      p_background_key: presentation.background,
+      p_font_key: presentation.font,
+      p_text_size_key: presentation.textSize,
+      p_text_alignment_key: presentation.textAlignment,
+      p_text_position_key: presentation.textPosition,
+    }
+  );
+  if (result.status === "idempotency_conflict") {
+    throw new SenderApiError(
+      "clientRequestId was already used with a different request",
+      409
+    );
+  }
+  if (result.status !== "ok") throwRpcStatus(result.status);
+
+  const replay = (result as QueueRpcResult & { idempotent_replay?: unknown })
+    .idempotent_replay;
+  if (typeof replay !== "boolean") {
+    throw new Error("Invalid shared Lumi response");
+  }
+  return {
+    lumi: parseRpcLumi(result.lumi),
+    queue: parseQueueSnapshot(result.queue),
+    idempotentReplay: replay,
   };
 }

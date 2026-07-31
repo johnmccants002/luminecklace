@@ -6,6 +6,7 @@ import {
   safeTextSize,
   type LumiBackgroundKey,
   type LumiFontKey,
+  type LumiLinkAttachment,
 } from "@/lib/sender/necklaces";
 
 type RpcClient = {
@@ -33,6 +34,7 @@ type ResolveRpcResult = {
     textAlignment?: string | null;
     textPosition?: string | null;
   } | null;
+  attachment?: unknown;
 };
 
 type RevealRpcResult = {
@@ -57,6 +59,7 @@ export type PublicRecipientResolveResponse =
         textAlignment: "leading" | "center" | "trailing";
         textPosition: "top" | "center" | "bottom";
       };
+      attachment?: LumiLinkAttachment;
     }
   | { status: "empty" }
   | { status: "unavailable" };
@@ -92,6 +95,28 @@ function isRevealRpcResult(value: unknown): value is RevealRpcResult {
   return typeof value === "object" && value !== null && "status" in value;
 }
 
+function parseRecipientAttachment(value: unknown): LumiLinkAttachment | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const attachment = value as Record<string, unknown>;
+  if (
+    attachment.type !== "link" ||
+    attachment.provider !== "instagram" ||
+    !["post", "reel", "story", "profile", "instagram_link"].includes(
+      String(attachment.contentKind)
+    ) ||
+    typeof attachment.url !== "string" ||
+    !attachment.url.startsWith("https://instagram.com/") ||
+    attachment.host !== "instagram.com" ||
+    attachment.ctaLabel !== "View on Instagram" ||
+    attachment.openMode !== "external"
+  ) {
+    return undefined;
+  }
+  return attachment as LumiLinkAttachment;
+}
+
 export async function resolveNextRecipientTap(
   client: RpcClient,
   tokenHash: string
@@ -125,7 +150,10 @@ export async function resolveNextRecipientTap(
       presentation.theme ?? presentation.background
     );
 
-    return {
+    const response: Extract<
+      PublicRecipientResolveResponse,
+      { status: "ready" }
+    > = {
       status: "ready",
       revealSessionId: data.reveal_session_id,
       necklace: {
@@ -153,6 +181,9 @@ export async function resolveNextRecipientTap(
         textPosition: safeTextPosition(presentation.textPosition),
       },
     };
+    const attachment = parseRecipientAttachment(data.attachment);
+    if (attachment) response.attachment = attachment;
+    return response;
   }
 
   if (data.status === "empty") {
