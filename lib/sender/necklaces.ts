@@ -7,6 +7,10 @@ import type {
   InstagramContentKind,
   NormalizedInstagramLink,
 } from "@/lib/shared-links/instagram";
+import {
+  isLumiReactionKey,
+  type LumiRevealFeedback,
+} from "@/lib/tap/feedback";
 
 type OwnershipRow = {
   necklace_id: string;
@@ -42,6 +46,14 @@ type LumiRow = {
   external_content_kind?: string | null;
   created_at?: string;
   revealed_at?: string | null;
+};
+
+type FeedbackRow = {
+  necklace_lumi_id: string;
+  reaction_key: string | null;
+  response_text: string | null;
+  reacted_at: string | null;
+  responded_at: string | null;
 };
 
 type EnqueueRpcResult = {
@@ -206,6 +218,7 @@ export type RevealedLumi = {
   revealedAt: string;
   presentation: SenderLumi["presentation"];
   attachment?: LumiLinkAttachment;
+  feedback: LumiRevealFeedback | null;
 };
 
 export type SenderNecklace = {
@@ -461,7 +474,45 @@ function mapLumi(row: LumiRow, fallbackTheme: string): SenderLumi {
   return lumi;
 }
 
-function mapRevealedLumi(row: LumiRow, fallbackTheme: string): RevealedLumi {
+function normalizeFeedbackTimestamp(value: string | null): string | null {
+  if (value === null) return null;
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) {
+    throw new Error("Invalid revealed Lumi feedback response");
+  }
+  return timestamp.toISOString();
+}
+
+function mapFeedback(row: FeedbackRow): LumiRevealFeedback {
+  if (row.reaction_key !== null && !isLumiReactionKey(row.reaction_key)) {
+    throw new Error("Invalid revealed Lumi feedback response");
+  }
+  const reactionAt = normalizeFeedbackTimestamp(row.reacted_at);
+  const respondedAt = normalizeFeedbackTimestamp(row.responded_at);
+  if (
+    (row.reaction_key === null) !== (reactionAt === null) ||
+    (row.response_text === null) !== (respondedAt === null) ||
+    (row.response_text !== null &&
+      (row.response_text !== row.response_text.trim() ||
+        row.response_text.length < 1 ||
+        Array.from(row.response_text).length > 250)) ||
+    (row.reaction_key === null && row.response_text === null)
+  ) {
+    throw new Error("Invalid revealed Lumi feedback response");
+  }
+  return {
+    reaction: row.reaction_key,
+    reactionAt,
+    responseText: row.response_text,
+    respondedAt,
+  };
+}
+
+function mapRevealedLumi(
+  row: LumiRow,
+  fallbackTheme: string,
+  feedback: LumiRevealFeedback | null
+): RevealedLumi {
   if (!row.revealed_at) {
     throw new Error("Invalid revealed Lumi response");
   }
@@ -472,6 +523,7 @@ function mapRevealedLumi(row: LumiRow, fallbackTheme: string): RevealedLumi {
     text: lumi.text,
     revealedAt: row.revealed_at,
     presentation: lumi.presentation,
+    feedback,
   };
   if (lumi.attachment) revealed.attachment = lumi.attachment;
   return revealed;
@@ -600,7 +652,34 @@ export async function listSenderNecklaces(
   const necklaces = (necklaceData ?? []) as NecklaceRow[];
   const lumis = (lumiData ?? []) as LumiRow[];
   const revealedLumis = (revealedData ?? []) as LumiRow[];
-  const reserveByNecklace = await listSenderReserveSummaries(client, necklaceIds);
+  const recentlyRevealedRows = necklaces.flatMap((necklace) =>
+    revealedLumis
+      .filter((lumi) => lumi.necklace_id === necklace.id)
+      .sort(compareRevealedRows)
+      .slice(0, 5)
+  );
+  const recentlyRevealedIds = recentlyRevealedRows.map((lumi) => lumi.id);
+  const [{ data: feedbackData, error: feedbackError }, reserveByNecklace] =
+    await Promise.all([
+      recentlyRevealedIds.length === 0
+        ? Promise.resolve({ data: [] as FeedbackRow[], error: null })
+        : client
+            .from("lumi_reveal_feedback")
+            .select(
+              "necklace_lumi_id, reaction_key, response_text, reacted_at, responded_at"
+            )
+            .in("necklace_lumi_id", recentlyRevealedIds),
+      listSenderReserveSummaries(client, necklaceIds),
+    ]);
+  if (feedbackError) {
+    throw new Error(feedbackError.message);
+  }
+  const feedbackByLumi = new Map(
+    ((feedbackData ?? []) as FeedbackRow[]).map((feedback) => [
+      feedback.necklace_lumi_id,
+      mapFeedback(feedback),
+    ])
+  );
   const ownershipByNecklace = new Map(
     ownerships.map((ownership) => [ownership.necklace_id, ownership])
   );
@@ -617,11 +696,15 @@ export async function listSenderNecklaces(
         available,
         themeKey
       );
-      const recentlyRevealed = revealedLumis
+      const recentlyRevealed = recentlyRevealedRows
         .filter((lumi) => lumi.necklace_id === necklace.id)
-        .sort(compareRevealedRows)
-        .slice(0, 5)
-        .map((lumi) => mapRevealedLumi(lumi, themeKey));
+        .map((lumi) =>
+          mapRevealedLumi(
+            lumi,
+            themeKey,
+            feedbackByLumi.get(lumi.id) ?? null
+          )
+        );
 
       return {
         id: necklace.id,

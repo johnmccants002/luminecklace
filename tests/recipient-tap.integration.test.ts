@@ -5,6 +5,8 @@ import test from "node:test";
 
 import { createClient } from "@supabase/supabase-js";
 
+import { POST as postReaction } from "../app/api/tap/reaction/route";
+import { POST as postResponse } from "../app/api/tap/response/route";
 import {
   confirmRecipientReveal,
   resolveNextRecipientTap,
@@ -139,6 +141,26 @@ async function callRevealed(revealSessionId: unknown) {
   return confirmRecipientReveal(admin, revealSessionId.trim());
 }
 
+function callReaction(body: unknown) {
+  return postReaction(
+    new Request("http://localhost/api/tap/reaction", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
+}
+
+function callResponse(body: unknown) {
+  return postResponse(
+    new Request("http://localhost/api/tap/response", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
+}
+
 async function hasRecipientSchema(): Promise<boolean> {
   const [{ error: lumiError }, { error: reserveError }] = await Promise.all([
     admin
@@ -182,12 +204,34 @@ async function hasSharedLinkSchema(): Promise<boolean> {
 
 const recipientSchemaReadyPromise = hasRecipientSchema();
 
+async function hasFeedbackSchema(): Promise<boolean> {
+  const { error } = await admin
+    .from("lumi_reveal_feedback")
+    .select("necklace_lumi_id, reveal_session_id, reaction_key, response_text")
+    .limit(1);
+  if (!error) return true;
+  if (isMissingSchemaError(error.message)) return false;
+  throw new Error(`Failed to inspect feedback schema: ${error.message}`);
+}
+
+let feedbackSchemaReadyPromise: Promise<boolean> | null = null;
+
 async function skipIfRecipientSchemaMissing() {
   const ready = await recipientSchemaReadyPromise;
   if (!ready) {
     console.log("[recipient-tap] recipient schema not found; skipping live integration assertions.");
   }
 
+  return !ready;
+}
+
+async function skipIfFeedbackSchemaMissing() {
+  if (await skipIfRecipientSchemaMissing()) return true;
+  feedbackSchemaReadyPromise ??= hasFeedbackSchema();
+  const ready = await feedbackSchemaReadyPromise;
+  if (!ready) {
+    console.log("[recipient-tap] feedback migration not found; skipping feedback assertions.");
+  }
   return !ready;
 }
 
@@ -326,6 +370,56 @@ async function cleanupFixture(fixture: { userId: string; necklaceId: string }) {
   await admin.from("necklaces").delete().eq("id", fixture.necklaceId);
   await admin.auth.admin.deleteUser(fixture.userId);
 }
+
+test("feedback routes reject malformed and unsupported public input", async () => {
+  const malformed = await postReaction(
+    new Request("http://localhost/api/tap/reaction", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{",
+    })
+  );
+  assert.equal(malformed.status, 400);
+  assert.deepEqual(await malformed.json(), { error: "Invalid JSON body" });
+
+  assert.equal(
+    (await callReaction({ revealSessionId: "not-a-uuid", reaction: "heart" }))
+      .status,
+    400
+  );
+  assert.equal(
+    (
+      await callReaction({
+        revealSessionId: randomUUID(),
+        reaction: "thumbs_up",
+      })
+    ).status,
+    400
+  );
+  assert.equal(
+    (
+      await callReaction({
+        revealSessionId: randomUUID(),
+        reaction: "heart",
+        necklaceLumiId: randomUUID(),
+      })
+    ).status,
+    400
+  );
+  assert.equal(
+    (await callResponse({ revealSessionId: randomUUID(), text: "   " })).status,
+    400
+  );
+  assert.equal(
+    (
+      await callResponse({
+        revealSessionId: randomUUID(),
+        text: "x".repeat(251),
+      })
+    ).status,
+    400
+  );
+});
 
 test("resolve returns ready and leaves the lumi unrevealed until confirmed", async () => {
   if (await skipIfRecipientSchemaMissing()) {
@@ -576,6 +670,277 @@ test("concurrent confirmation cannot reveal twice", async () => {
     }
 
     assert.equal(events.length, 1);
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test("revealed Lumi reactions validate, retry idempotently, and remain replaceable", async () => {
+  if (await skipIfFeedbackSchemaMissing()) return;
+
+  const fixture = await createFixture({
+    lumis: [{ queue_position: 1, content: "React to this Lumi." }],
+  });
+
+  try {
+    const resolve = await callResolve(fixture.rawToken);
+    assertReadyResolve(resolve);
+
+    assert.equal(
+      (await callReaction({ revealSessionId: "not-a-uuid", reaction: "heart" }))
+        .status,
+      400
+    );
+    assert.equal(
+      (
+        await callReaction({
+          revealSessionId: resolve.revealSessionId,
+          reaction: "thumbs_up",
+        })
+      ).status,
+      400
+    );
+    assert.equal(
+      (
+        await callReaction({
+          revealSessionId: resolve.revealSessionId,
+          reaction: "heart",
+          necklaceId: fixture.necklaceId,
+        })
+      ).status,
+      400
+    );
+    assert.equal(
+      (
+        await callReaction({
+          revealSessionId: randomUUID(),
+          reaction: "heart",
+        })
+      ).status,
+      404
+    );
+
+    const beforeReveal = await callReaction({
+      revealSessionId: resolve.revealSessionId,
+      reaction: "heart",
+    });
+    assert.equal(beforeReveal.status, 409);
+    assert.deepEqual(await beforeReveal.json(), { status: "not_revealed" });
+
+    assertSuccessfulReveal(await callRevealed(resolve.revealSessionId));
+    const first = await callReaction({
+      revealSessionId: resolve.revealSessionId,
+      reaction: "heart",
+    });
+    assert.equal(first.status, 200);
+    const firstBody = (await first.json()) as {
+      status: string;
+      feedback: {
+        reaction: string;
+        reactionAt: string;
+        responseText: string | null;
+        respondedAt: string | null;
+      };
+    };
+    assert.equal(firstBody.status, "reacted");
+    assert.equal(firstBody.feedback.reaction, "heart");
+    assert.equal(firstBody.feedback.responseText, null);
+    assert.equal(firstBody.feedback.respondedAt, null);
+    assert.equal(
+      new Date(firstBody.feedback.reactionAt).toISOString(),
+      firstBody.feedback.reactionAt
+    );
+
+    const retry = await callReaction({
+      revealSessionId: resolve.revealSessionId,
+      reaction: "heart",
+    });
+    assert.equal(retry.status, 200);
+    const retryBody = (await retry.json()) as typeof firstBody;
+    assert.deepEqual(retryBody, firstBody);
+
+    const response = await callResponse({
+      revealSessionId: resolve.revealSessionId,
+      text: "I felt this.",
+    });
+    assert.equal(response.status, 200);
+    const changed = await callReaction({
+      revealSessionId: resolve.revealSessionId,
+      reaction: "touched",
+    });
+    assert.equal(changed.status, 200);
+    const changedBody = (await changed.json()) as typeof firstBody;
+    assert.equal(changedBody.feedback.reaction, "touched");
+    assert.equal(changedBody.feedback.responseText, "I felt this.");
+    assert.equal(typeof changedBody.feedback.respondedAt, "string");
+
+    const stored = await admin
+      .from("lumi_reveal_feedback")
+      .select("reaction_key, response_text")
+      .eq("necklace_lumi_id", resolve.lumi.id);
+    assert.ifError(stored.error);
+    assert.deepEqual(stored.data, [
+      { reaction_key: "touched", response_text: "I felt this." },
+    ]);
+
+    const expiredAt = new Date(Date.now() - 1_000).toISOString();
+    const expiryUpdate = await admin
+      .from("lumi_reveal_sessions")
+      .update({ expires_at: expiredAt })
+      .eq("id", resolve.revealSessionId);
+    assert.ifError(expiryUpdate.error);
+    assert.equal(
+      (
+        await callReaction({
+          revealSessionId: resolve.revealSessionId,
+          reaction: "wow",
+        })
+      ).status,
+      410
+    );
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test("written response is trimmed, permanent, and preserves a reaction", async () => {
+  if (await skipIfFeedbackSchemaMissing()) return;
+
+  const fixture = await createFixture({
+    lumis: [{ queue_position: 1, content: "Respond once to this Lumi." }],
+  });
+
+  try {
+    const resolve = await callResolve(fixture.rawToken);
+    assertReadyResolve(resolve);
+    assertSuccessfulReveal(await callRevealed(resolve.revealSessionId));
+
+    assert.equal(
+      (
+        await callResponse({
+          revealSessionId: resolve.revealSessionId,
+          text: "   ",
+        })
+      ).status,
+      400
+    );
+    assert.equal(
+      (
+        await callResponse({
+          revealSessionId: resolve.revealSessionId,
+          text: "x".repeat(251),
+        })
+      ).status,
+      400
+    );
+
+    const reaction = await callReaction({
+      revealSessionId: resolve.revealSessionId,
+      reaction: "sparkle",
+    });
+    assert.equal(reaction.status, 200);
+
+    const first = await callResponse({
+      revealSessionId: resolve.revealSessionId,
+      text: "  This was exactly what I needed today.  ",
+    });
+    assert.equal(first.status, 200);
+    const firstBody = (await first.json()) as {
+      status: string;
+      feedback: {
+        reaction: string | null;
+        reactionAt: string | null;
+        responseText: string;
+        respondedAt: string;
+      };
+    };
+    assert.equal(firstBody.status, "responded");
+    assert.equal(firstBody.feedback.reaction, "sparkle");
+    assert.equal(
+      firstBody.feedback.responseText,
+      "This was exactly what I needed today."
+    );
+    assert.equal(
+      new Date(firstBody.feedback.respondedAt).toISOString(),
+      firstBody.feedback.respondedAt
+    );
+
+    const second = await callResponse({
+      revealSessionId: resolve.revealSessionId,
+      text: "Replace the first response.",
+    });
+    assert.equal(second.status, 409);
+    assert.deepEqual(await second.json(), {
+      status: "already_responded",
+      error: "A written response has already been submitted",
+    });
+
+    const stored = await admin
+      .from("lumi_reveal_feedback")
+      .select("reaction_key, response_text, responded_at")
+      .eq("necklace_lumi_id", resolve.lumi.id)
+      .single();
+    assert.ifError(stored.error);
+    assert.equal(stored.data.reaction_key, "sparkle");
+    assert.equal(
+      stored.data.response_text,
+      "This was exactly what I needed today."
+    );
+    assert.equal(
+      new Date(stored.data.responded_at).toISOString(),
+      firstBody.feedback.respondedAt
+    );
+  } finally {
+    await cleanupFixture(fixture);
+  }
+});
+
+test("concurrent written responses persist exactly one value", async () => {
+  if (await skipIfFeedbackSchemaMissing()) return;
+
+  const fixture = await createFixture({
+    lumis: [{ queue_position: 1, content: "Concurrent response Lumi." }],
+  });
+
+  try {
+    const resolve = await callResolve(fixture.rawToken);
+    assertReadyResolve(resolve);
+    assertSuccessfulReveal(await callRevealed(resolve.revealSessionId));
+    assert.equal(
+      (
+        await callReaction({
+          revealSessionId: resolve.revealSessionId,
+          reaction: "hug",
+        })
+      ).status,
+      200
+    );
+
+    const [first, second] = await Promise.all([
+      callResponse({
+        revealSessionId: resolve.revealSessionId,
+        text: "First concurrent response",
+      }),
+      callResponse({
+        revealSessionId: resolve.revealSessionId,
+        text: "Second concurrent response",
+      }),
+    ]);
+    assert.deepEqual([first.status, second.status].sort(), [200, 409]);
+
+    const stored = await admin
+      .from("lumi_reveal_feedback")
+      .select("reaction_key, response_text")
+      .eq("necklace_lumi_id", resolve.lumi.id);
+    assert.ifError(stored.error);
+    assert.equal(stored.data.length, 1);
+    assert.equal(stored.data[0].reaction_key, "hug");
+    assert.equal(
+      ["First concurrent response", "Second concurrent response"].includes(
+        stored.data[0].response_text
+      ),
+      true
+    );
   } finally {
     await cleanupFixture(fixture);
   }

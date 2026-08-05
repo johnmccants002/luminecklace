@@ -204,6 +204,82 @@ npm run test:recipient-tap
 Supabase-backed integration tests require the environment variables above and
 the latest migrations applied.
 
+## Recipient reveal feedback
+
+Reveal feedback is a one-way acknowledgment attached to a revealed personal
+Lumi. It is not messaging: there is no reply thread, sender reply, recipient
+history, inbox, or typing state.
+
+The recipient authorizes both actions with the random `revealSessionId` from
+the tap resolve response. Necklace, Lumi, sender, and author IDs are resolved
+server-side and must not be supplied by the public client. The session must
+have completed its reveal and must not be expired.
+
+Supported stable reaction keys are `heart`, `touched`, `laugh`, `sparkle`,
+`hug`, and `wow`. The client maps these keys to display emoji.
+
+### Set or replace a reaction
+
+```text
+POST /api/tap/reaction
+Content-Type: application/json
+```
+
+```json
+{
+  "revealSessionId": "00000000-0000-4000-8000-000000000000",
+  "reaction": "touched"
+}
+```
+
+HTTP 200 returns:
+
+```json
+{
+  "status": "reacted",
+  "feedback": {
+    "reaction": "touched",
+    "reactionAt": "2026-08-04T20:00:00.000Z",
+    "responseText": null,
+    "respondedAt": null
+  }
+}
+```
+
+Repeating the same reaction is idempotent. Choosing another supported key
+updates the single feedback record and preserves any written response.
+
+### Submit the one written response
+
+```text
+POST /api/tap/response
+Content-Type: application/json
+```
+
+```json
+{
+  "revealSessionId": "00000000-0000-4000-8000-000000000000",
+  "text": "This was exactly what I needed today."
+}
+```
+
+HTTP 200 returns the same `feedback` shape with `status: "responded"`. Text is
+trimmed and must contain 1–250 characters. The first written response is
+permanent; later submissions return HTTP 409 with
+`status: "already_responded"` and never replace it.
+
+Both endpoints return HTTP 400 for malformed input, 404 for an unavailable
+session, 409 when reveal has not completed, and 410 for an expired session.
+The authenticated sender necklace response exposes this acknowledgment as
+`recentlyRevealed[].feedback`, or `null` when none exists. It never exposes the
+reveal session or internal feedback identifiers.
+
+Apply the feedback table and security-definer RPCs before deploying the API:
+
+```bash
+supabase db push
+```
+
 ## Share to Lumi: Instagram links
 
 The backend accepts an Instagram link as an immutable attachment on a normal

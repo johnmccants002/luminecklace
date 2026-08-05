@@ -9,7 +9,7 @@
     "lint": "eslint",
     "seed": "node --env-file=.env --import tsx scripts/seed.ts",
     "seed:dev-user": "node --import tsx scripts/seed-dev-user.ts",
-    "test:recipient-tap": "node --import tsx --test tests/recipient-tap.integration.test.ts",
+    "test:recipient-tap": "node --conditions react-server --env-file=.env --import tsx --test tests/recipient-tap.integration.test.ts",
     "test:shared-links": "node --conditions react-server --import tsx --test tests/shared-links.test.ts",
     "test:reserve": "node --env-file=.env --import tsx --test --test-name-pattern=Reserve tests/recipient-tap.integration.test.ts tests/sender.integration.test.ts",
     "test:sender": "node --conditions react-server --env-file=.env --import tsx --test tests/sender.integration.test.ts",
