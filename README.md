@@ -474,3 +474,125 @@ npm run seed
 
 The seed is idempotent and publishes the existing five-category Heart
 Collection in deterministic category order.
+
+## iOS push notifications
+
+Lumi sends owner notifications directly through APNs when a recipient reveals a
+personal Lumi, adds the first reaction, or submits the one written response.
+The recipient RPC mutation and a deduplicated `push_events` row are committed in
+the same Postgres transaction. Per-device `push_deliveries` are claimed with
+`SKIP LOCKED`; recipient requests never wait for Apple. Next.js `after()` makes
+the first delivery attempt, and `/api/cron/push` recovers pending or retryable
+deliveries every five minutes.
+
+Push payloads contain only the event type and internal necklace, Lumi, and
+reveal-session UUIDs. They never include Lumi text, written responses, email
+addresses, NFC values, access tokens, or APNs device tokens.
+
+### Server environment
+
+Configure these server-only values in local development and every deployed
+Vercel environment that sends pushes:
+
+```text
+APNS_TEAM_ID=<10-character Apple Developer team ID>
+APNS_KEY_ID=<Apple push key ID>
+APNS_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----
+...
+-----END PRIVATE KEY-----
+APNS_BUNDLE_ID=luminecklace.luminecklace
+APNS_DEFAULT_ENVIRONMENT=production
+CRON_SECRET=<long random secret>
+```
+
+`APNS_PRIVATE_KEY` is the full multiline contents of the downloaded `.p8`
+file. Literal `\n` separators are also supported. As an alternative for secret
+stores that cannot preserve newlines, set `APNS_PRIVATE_KEY_BASE64` to the
+base64 encoding of the complete `.p8` file and omit `APNS_PRIVATE_KEY`.
+
+Never commit the `.p8` file or any Apple credential. Keep `CRON_SECRET` and all
+APNs variables free of the `NEXT_PUBLIC_` prefix.
+
+### Apple Developer setup
+
+1. Confirm the full iOS app uses bundle ID `luminecklace.luminecklace` and has
+   the Push Notifications capability and remote-notification entitlement.
+2. In Apple Developer Certificates, Identifiers & Profiles, create a token-based
+   APNs key with Apple Push Notifications service enabled. Download the `.p8`
+   file once and record its key ID and the developer-team ID.
+3. Add the values above to Vercel Production, Preview, and Development only
+   where that environment should send notifications. Redeploy after changing
+   them.
+4. Apply `supabase/migrations/20260805120000_ios_push_notifications.sql` before
+   deploying the API code.
+
+A debug/development build receives a sandbox token. TestFlight and App Store
+builds receive production tokens. Tokens are not interchangeable, so the iOS
+app must register the matching `environment` with each token. The database
+keeps sandbox and production installations distinct.
+
+### Register a development device
+
+After iOS receives the APNs token, send it with the signed-in owner's Supabase
+access token:
+
+```bash
+curl -X PUT https://<host>/api/push/devices \
+  -H "Authorization: Bearer <supabase-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "deviceToken":"<lowercase-hex-apns-token>",
+    "environment":"sandbox",
+    "bundleId":"luminecklace.luminecklace",
+    "appVersion":"1.0",
+    "deviceModel":"iPhone"
+  }'
+```
+
+Registration is idempotent. Registering the same installation after another
+owner signs in atomically reassigns it, so the prior owner stops receiving
+pushes. Before sign-out, call `DELETE /api/push/devices` with `deviceToken` and
+`environment`; the operation is also idempotent.
+
+Owner settings are available through `GET /api/push/preferences` and partial
+boolean updates through `PATCH /api/push/preferences`.
+
+### Test and operate delivery
+
+To exercise the production path, register a sandbox device, reveal a test Lumi,
+and confirm that the owner receives the safe lock-screen notification. A
+protected manual recovery run is available with:
+
+```bash
+curl https://<host>/api/cron/push \
+  -H "Authorization: Bearer <CRON_SECRET>"
+```
+
+Successful deliveries are retained as `sent`. APNs `429` and temporary server
+or HTTP/2 failures use exponential backoff with jitter for up to eight attempts.
+Permanent payload/configuration failures are marked `failed`. `Unregistered`,
+`ExpiredToken`, `BadDeviceToken`, `DeviceTokenNotForTopic`, and HTTP 410 mark the
+installation inactive so it is excluded from future events. A later successful
+device registration activates it again.
+
+Manual verification checklist:
+
+- Apply the migration and deploy with all APNs and cron secrets configured.
+- Register a sandbox device and verify the row is active without exposing its
+  token in logs or API responses.
+- Reveal one Lumi twice and confirm only one reveal event/delivery exists.
+- React, change the reaction, and confirm only the first reaction notified.
+- Submit a response and inspect the APNs payload to confirm response/Lumi text
+  is absent.
+- Disable each preference and confirm its event is recorded without a delivery.
+- Sign out, deactivate the device, and confirm later events do not target it.
+- Run the protected cron route and confirm it returns only aggregate counts.
+
+Focused verification:
+
+```bash
+npm run test:push
+npm run test:recipient-tap
+npm run lint
+npm run build
+```

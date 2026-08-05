@@ -3,6 +3,9 @@ import { NextResponse } from "next/server";
 import { getSupabaseConnectionErrorMessage } from "@/lib/supabase/env";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { confirmRecipientReveal } from "@/lib/tap/recipient";
+import { schedulePushDispatch } from "@/lib/push/schedule";
+
+export const runtime = "nodejs";
 
 type RevealedBody = {
   revealSessionId?: unknown;
@@ -47,6 +50,7 @@ export async function POST(req: Request) {
       const result = await confirmRecipientReveal(supabaseAdmin, revealSessionId);
 
       if (result.status === "revealed") {
+        schedulePushDispatch();
         return NextResponse.json(result);
       }
 
