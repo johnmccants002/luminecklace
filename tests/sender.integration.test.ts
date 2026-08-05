@@ -133,8 +133,10 @@ async function createFixture(): Promise<Fixture> {
   }
 
   const revealedBase = Date.now() - 60_000;
-  const { error: lumiError } = await admin.from("necklace_lumis").insert([
-    {
+  const { data: insertedLumis, error: lumiError } = await admin
+    .from("necklace_lumis")
+    .insert([
+      {
       necklace_id: primary.id,
       author_user_id: ownerData.user.id,
       content: "First queued Lumi",
@@ -147,8 +149,8 @@ async function createFixture(): Promise<Fixture> {
       text_size_key: "large",
       text_alignment_key: "leading",
       text_position_key: "bottom",
-    },
-    {
+      },
+      {
       necklace_id: primary.id,
       author_user_id: ownerData.user.id,
       content: "Second queued Lumi",
@@ -161,25 +163,113 @@ async function createFixture(): Promise<Fixture> {
       text_size_key: "medium",
       text_alignment_key: "center",
       text_position_key: "center",
-    },
-    ...Array.from({ length: 6 }, (_, index) => ({
-      necklace_id: primary.id,
-      author_user_id: ownerData.user.id,
-      content: `Revealed Lumi ${index + 1}`,
-      queue_position: index + 3,
-      is_enabled: true,
-      revealed_at: new Date(revealedBase + index * 1_000).toISOString(),
-      theme_key: "heart",
-      animation_key: "breathe",
-      sound_key: "soft",
-      text_size_key: "medium",
-      text_alignment_key: "center",
-      text_position_key: "center",
-    })),
-  ]);
+      },
+      ...Array.from({ length: 6 }, (_, index) => ({
+        necklace_id: primary.id,
+        author_user_id: ownerData.user.id,
+        content: `Revealed Lumi ${index + 1}`,
+        queue_position: index + 3,
+        is_enabled: true,
+        revealed_at: new Date(revealedBase + index * 1_000).toISOString(),
+        theme_key: "heart",
+        animation_key: "breathe",
+        sound_key: "soft",
+        text_size_key: "medium",
+        text_alignment_key: "center",
+        text_position_key: "center",
+      })),
+      {
+        necklace_id: other.id,
+        author_user_id: otherData.user.id,
+        content: "Other sender private response Lumi",
+        queue_position: 1,
+        is_enabled: true,
+        revealed_at: new Date(revealedBase + 10_000).toISOString(),
+        theme_key: "heart",
+        animation_key: "breathe",
+        sound_key: "soft",
+        text_size_key: "medium",
+        text_alignment_key: "center",
+        text_position_key: "center",
+      },
+    ])
+    .select("id, necklace_id, content, revealed_at");
 
-  if (lumiError) {
-    throw new Error(lumiError.message);
+  if (lumiError || !insertedLumis) {
+    throw new Error(lumiError?.message ?? "Failed to create Lumis");
+  }
+
+  const ownerFeedbackLumi = insertedLumis.find(
+    (lumi) => lumi.content === "Revealed Lumi 6"
+  );
+  const otherFeedbackLumi = insertedLumis.find(
+    (lumi) => lumi.content === "Other sender private response Lumi"
+  );
+  assert.ok(ownerFeedbackLumi?.revealed_at);
+  assert.ok(otherFeedbackLumi?.revealed_at);
+
+  const ownerSessionId = randomUUID();
+  const otherSessionId = randomUUID();
+  const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+  const { error: sessionError } = await admin
+    .from("lumi_reveal_sessions")
+    .insert([
+      {
+        id: ownerSessionId,
+        necklace_id: primary.id,
+        necklace_lumi_id: ownerFeedbackLumi.id,
+        source_type: "personal",
+        expires_at: expiresAt,
+        completed_at: ownerFeedbackLumi.revealed_at,
+        revealed_at: ownerFeedbackLumi.revealed_at,
+      },
+      {
+        id: otherSessionId,
+        necklace_id: other.id,
+        necklace_lumi_id: otherFeedbackLumi.id,
+        source_type: "personal",
+        expires_at: expiresAt,
+        completed_at: otherFeedbackLumi.revealed_at,
+        revealed_at: otherFeedbackLumi.revealed_at,
+      },
+    ]);
+  if (sessionError) throw new Error(sessionError.message);
+
+  const feedbackAt = new Date(revealedBase + 20_000).toISOString();
+  const { error: feedbackError } = await admin
+    .from("lumi_reveal_feedback")
+    .insert([
+      {
+        necklace_lumi_id: ownerFeedbackLumi.id,
+        reveal_session_id: ownerSessionId,
+        reaction_key: "touched",
+        reacted_at: feedbackAt,
+        response_text: "Thank you for this.",
+        responded_at: feedbackAt,
+      },
+      {
+        necklace_lumi_id: otherFeedbackLumi.id,
+        reveal_session_id: otherSessionId,
+        reaction_key: "heart",
+        reacted_at: feedbackAt,
+        response_text: "Private response for another sender.",
+        responded_at: feedbackAt,
+      },
+    ]);
+  if (feedbackError) {
+    await cleanupFixture({
+      ownerId: ownerData.user.id,
+      otherUserId: otherData.user.id,
+      primaryNecklaceId: primary.id,
+      secondaryNecklaceId: secondary.id,
+      otherNecklaceId: other.id,
+      primaryTokenHash,
+      ownerEmail,
+      ownerPassword,
+      otherEmail,
+      otherPassword,
+    });
+    throw new Error(feedbackError.message);
   }
 
   return {
@@ -556,6 +646,23 @@ test("sender necklace APIs scope ownership, order primary first, and enqueue saf
         "Revealed Lumi 3",
         "Revealed Lumi 2",
       ]
+    );
+    const revealedFeedback = necklaces[0].recentlyRevealed[0].feedback;
+    assert.ok(revealedFeedback);
+    assert.equal(revealedFeedback.reaction, "touched");
+    assert.equal(revealedFeedback.responseText, "Thank you for this.");
+    assert.equal(
+      new Date(revealedFeedback.reactionAt!).toISOString(),
+      revealedFeedback.reactionAt
+    );
+    assert.equal(
+      new Date(revealedFeedback.respondedAt!).toISOString(),
+      revealedFeedback.respondedAt
+    );
+    assert.equal(necklaces[0].recentlyRevealed[1].feedback, null);
+    assert.equal(
+      JSON.stringify(necklaces).includes("Private response for another sender."),
+      false
     );
     assert.equal(necklaces[1].id, fixture.secondaryNecklaceId);
     assert.equal(necklaces[1].nextLumi, null);
