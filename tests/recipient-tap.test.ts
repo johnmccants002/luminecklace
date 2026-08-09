@@ -118,6 +118,41 @@ test("recipient ready mapping includes a valid Instagram attachment", async () =
   }
 });
 
+test("recipient ready mapping includes a valid website attachment", async () => {
+  const response = await resolveNextRecipientTap(
+    rpcResult({
+      status: "ready",
+      reveal_session_id: "session-id",
+      lumi_id: "lumi-id",
+      lumi_text: "Look at this.",
+      presentation: {},
+      attachment: {
+        type: "link",
+        provider: "website",
+        contentKind: "link",
+        url: "https://xn--bcher-kva.de/path?q=1#fragment",
+        host: "xn--bcher-kva.de",
+        ctaLabel: "Open website",
+        openMode: "external",
+      },
+    }),
+    "token"
+  );
+
+  assert.equal(response.status, "ready");
+  if (response.status === "ready") {
+    assert.deepEqual(response.attachment, {
+      type: "link",
+      provider: "website",
+      contentKind: "link",
+      url: "https://xn--bcher-kva.de/path?q=1#fragment",
+      host: "xn--bcher-kva.de",
+      ctaLabel: "Open website",
+      openMode: "external",
+    });
+  }
+});
+
 test("text-only recipient mapping preserves the exact response shape", async () => {
   const response = await resolveNextRecipientTap(
     rpcResult({

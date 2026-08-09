@@ -11,6 +11,7 @@ import {
   confirmRecipientReveal,
   resolveNextRecipientTap,
 } from "../lib/tap/recipient";
+import type { LumiLinkAttachment } from "../lib/sender/necklaces";
 
 type ResolveResponse =
   | {
@@ -29,15 +30,7 @@ type ResolveResponse =
         textAlignment: "leading" | "center" | "trailing";
         textPosition: "top" | "center" | "bottom";
       };
-      attachment?: {
-        type: "link";
-        provider: "instagram";
-        contentKind: "post" | "reel" | "story" | "profile" | "instagram_link";
-        url: string;
-        host: "instagram.com";
-        ctaLabel: "View on Instagram";
-        openMode: "external";
-      };
+      attachment?: LumiLinkAttachment;
     }
   | { status: "empty" }
   | { status: "unavailable" }
