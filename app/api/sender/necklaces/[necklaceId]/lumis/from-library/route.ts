@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { requireUser } from "@/lib/auth/requireUser";
 import { enqueueSenderLibraryMessage } from "@/lib/sender/message-library";
+import { normalizeLibraryCustomization } from "@/lib/sender/experience-presets";
 import {
   normalizeQueueSection,
   SenderApiError,
@@ -16,6 +17,7 @@ type RouteContext = {
 type FromLibraryBody = {
   messageId?: unknown;
   destination?: unknown;
+  customization?: unknown;
 };
 
 const UUID_PATTERN =
@@ -40,7 +42,7 @@ export async function POST(req: Request, context: RouteContext) {
       typeof body !== "object" ||
       Array.isArray(body) ||
       Object.keys(body).some(
-        (key) => !["messageId", "destination"].includes(key)
+        (key) => !["messageId", "destination", "customization"].includes(key)
       )
     ) {
       throw new SenderApiError("body contains unsupported fields", 400);
@@ -49,13 +51,15 @@ export async function POST(req: Request, context: RouteContext) {
       throw new SenderApiError("messageId must be a UUID", 400);
     }
     const destination = normalizeQueueSection(body.destination);
+    const customization = normalizeLibraryCustomization(body.customization);
 
     const result = await enqueueSenderLibraryMessage(
       supabaseAdmin,
       user.id,
       necklaceId,
       body.messageId,
-      destination
+      destination,
+      customization
     );
     return NextResponse.json(result, { status: 201 });
   } catch (error) {

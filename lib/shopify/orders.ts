@@ -123,6 +123,17 @@ export async function processShopifyPaidOrder(
   }
 
   const ingestion = asIngestionResult(data);
+
+  if (parsed.order.shopify_order_number) {
+    const { error: orderNumberError } = await supabaseAdmin
+      .from("orders")
+      .update({ shopify_order_number: parsed.order.shopify_order_number })
+      .eq("id", ingestion.order_id);
+    if (orderNumberError) {
+      throw new Error("Failed to persist Shopify order number");
+    }
+  }
+
   if (ingestion.replayed) {
     return { result: "replayed" };
   }

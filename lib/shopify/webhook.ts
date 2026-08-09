@@ -17,6 +17,7 @@ export type ShopifyWebhookConfig = {
 
 export type ShopifyOrderForIngestion = {
   shopify_order_id: string;
+  shopify_order_number: string | null;
   purchaser_email_normalized: string | null;
   ingestion_outcome: "ready" | "ignored" | "manual_review";
   shopify_created_at: string | null;
@@ -286,6 +287,7 @@ export function parseShopifyPaidOrder(
   return {
     order: {
       shopify_order_id: requiredId(payload.id, "id"),
+      shopify_order_number: optionalId(payload.order_number, "order_number"),
       purchaser_email_normalized: contactEmail,
       ingestion_outcome: ingestionOutcome,
       shopify_created_at: optionalTimestamp(payload.created_at, "created_at"),

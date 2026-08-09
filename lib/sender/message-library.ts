@@ -21,10 +21,19 @@ import {
   type SenderQueueSnapshot,
   type SenderLumi,
 } from "@/lib/sender/necklaces";
+import {
+  safeExperiencePresetKey,
+  type LibraryTextCustomization,
+} from "@/lib/sender/experience-presets";
 
 type CatalogRow = {
   id: string;
+  title: string | null;
   text: string;
+  secondary_text: string | null;
+  mood: string | null;
+  duration_seconds: number | null;
+  experience_preset_key: string | null;
   category: MessageLibraryCategoryKey;
   explore_sort_order: number;
   theme_key: string | null;
@@ -97,7 +106,7 @@ export async function listSenderMessageLibrary(
   let query = client
     .from("messages")
     .select(
-      "id, text, category, explore_sort_order, theme_key, animation_key, sound_key, background_key, font_key, text_size_key, text_alignment_key, text_position_key"
+      "id, title, text, secondary_text, mood, duration_seconds, experience_preset_key, category, explore_sort_order, theme_key, animation_key, sound_key, background_key, font_key, text_size_key, text_alignment_key, text_position_key"
     )
     .eq("is_active", true)
     .eq("is_explore_published", true)
@@ -165,7 +174,14 @@ export async function listSenderMessageLibrary(
         .sort((left, right) => right.localeCompare(left))[0] ?? null;
       return {
         id: row.id,
+        title: row.title ?? row.text,
         text: row.text,
+        secondaryText: row.secondary_text,
+        mood: row.mood,
+        durationSeconds: row.duration_seconds,
+        experiencePresetKey: safeExperiencePresetKey(
+          row.experience_preset_key
+        ),
         category: { key: category.key, name: category.name },
         presentation: {
           theme: safeBackground(row.theme_key),
@@ -208,7 +224,8 @@ export async function enqueueSenderLibraryMessage(
   userId: string,
   necklaceId: string,
   messageId: string,
-  destination: SenderQueueSection
+  destination: SenderQueueSection,
+  customization?: LibraryTextCustomization
 ): Promise<{ lumi: SenderLumi; queue: SenderQueueSnapshot }> {
   const necklace = await requireSenderOwnedNecklace(
     client,
@@ -226,6 +243,13 @@ export async function enqueueSenderLibraryMessage(
       p_necklace_id: necklaceId,
       p_message_id: messageId,
       p_destination: destination,
+      p_primary_text: customization?.primaryText ?? null,
+      p_secondary_text:
+        customization && "secondaryText" in customization
+          ? customization.secondaryText ?? null
+          : null,
+      p_has_secondary_text:
+        customization !== undefined && "secondaryText" in customization,
     }
   );
   if (error) {

@@ -41,6 +41,8 @@ type LumiRow = {
   text_size_key: string | null;
   text_alignment_key: string | null;
   text_position_key: string | null;
+  experience_preset_key?: string | null;
+  secondary_text?: string | null;
   external_url?: string | null;
   external_provider?: string | null;
   external_content_kind?: string | null;
@@ -70,6 +72,10 @@ type EnqueueRpcResult = {
   text_size_key?: unknown;
   text_alignment_key?: unknown;
   text_position_key?: unknown;
+  experience_preset_key?: unknown;
+  experiencePresetKey?: unknown;
+  secondary_text?: unknown;
+  secondaryText?: unknown;
   presentation?: unknown;
   attachment?: unknown;
 };
@@ -96,6 +102,8 @@ export type LumiPresentation = {
 export type SenderLumi = {
   id: string;
   text: string;
+  experiencePresetKey: string;
+  secondaryText?: string;
   queuePosition: number;
   presentation: LumiPresentation;
   attachment?: LumiLinkAttachment;
@@ -452,6 +460,9 @@ function mapLumi(row: LumiRow, fallbackTheme: string): SenderLumi {
   const lumi: SenderLumi = {
     id: row.id,
     text: row.content,
+    experiencePresetKey:
+      row.experience_preset_key ?? "classic_word_rise_v1",
+    ...(row.secondary_text ? { secondaryText: row.secondary_text } : {}),
     queuePosition: row.queue_position,
     presentation: {
       theme: background,
@@ -620,7 +631,7 @@ export async function listSenderNecklaces(
       client
         .from("necklace_lumis")
         .select(
-          "id, necklace_id, content, queue_position, queue_section, theme_key, animation_key, sound_key, background_key, font_key, text_size_key, text_alignment_key, text_position_key, external_url, external_provider, external_content_kind, created_at"
+          "id, necklace_id, content, queue_position, queue_section, theme_key, animation_key, sound_key, background_key, font_key, text_size_key, text_alignment_key, text_position_key, experience_preset_key, secondary_text, external_url, external_provider, external_content_kind, created_at"
         )
         .in("necklace_id", necklaceIds)
         .eq("is_enabled", true)
@@ -631,7 +642,7 @@ export async function listSenderNecklaces(
       client
         .from("necklace_lumis")
         .select(
-          "id, necklace_id, content, queue_position, theme_key, animation_key, sound_key, background_key, font_key, text_size_key, text_alignment_key, text_position_key, external_url, external_provider, external_content_kind, revealed_at"
+          "id, necklace_id, content, queue_position, theme_key, animation_key, sound_key, background_key, font_key, text_size_key, text_alignment_key, text_position_key, experience_preset_key, secondary_text, external_url, external_provider, external_content_kind, revealed_at"
         )
         .in("necklace_id", necklaceIds)
         .not("revealed_at", "is", null)
@@ -772,6 +783,21 @@ export function parseRpcLumi(value: unknown): SenderLumi {
   const lumi: SenderLumi = {
     id: result.id,
     text,
+    experiencePresetKey:
+      typeof result.experiencePresetKey === "string"
+        ? result.experiencePresetKey
+        : typeof result.experience_preset_key === "string"
+          ? result.experience_preset_key
+          : "classic_word_rise_v1",
+    ...((typeof result.secondaryText === "string" && result.secondaryText) ||
+    (typeof result.secondary_text === "string" && result.secondary_text)
+      ? {
+          secondaryText:
+            typeof result.secondaryText === "string"
+              ? result.secondaryText
+              : (result.secondary_text as string),
+        }
+      : {}),
     queuePosition: queuePosition ?? 1,
     presentation: (() => {
       const background = safeBackground(
