@@ -10,6 +10,10 @@ import {
   parseLibraryLimit,
 } from "../lib/sender/message-library-contract";
 import {
+  normalizeLibraryCustomization,
+  safeExperiencePresetKey,
+} from "../lib/sender/experience-presets";
+import {
   normalizeLumiPresentation,
   normalizeLumiPresentationPatch,
   parseRpcLumi,
@@ -123,4 +127,44 @@ test("older Lumi RPC records map missing layout values to safe defaults", () => 
   assert.equal(lumi.presentation.textSize, "medium");
   assert.equal(lumi.presentation.textAlignment, "center");
   assert.equal(lumi.presentation.textPosition, "center");
+  assert.equal(lumi.experiencePresetKey, "classic_word_rise_v1");
+});
+
+test("Explore customization accepts text slots and rejects renderer data", () => {
+  assert.deepEqual(
+    normalizeLibraryCustomization({
+      primaryText: "  A custom Lumi  ",
+      secondaryText: "  Then this  ",
+    }),
+    { primaryText: "A custom Lumi", secondaryText: "Then this" }
+  );
+  assert.deepEqual(normalizeLibraryCustomization({ secondaryText: "  " }), {
+    secondaryText: null,
+  });
+  assert.throws(
+    () => normalizeLibraryCustomization({ animation: { delay: 0 } }),
+    (error: unknown) =>
+      error instanceof SenderApiError &&
+      error.message === "customization contains unsupported fields"
+  );
+  assert.throws(
+    () => normalizeLibraryCustomization({ secondaryText: "x".repeat(251) }),
+    (error: unknown) => error instanceof SenderApiError && error.status === 400
+  );
+});
+
+test("experience presets are versioned and unknown values fall back safely", () => {
+  assert.equal(safeExperiencePresetKey("timed_surprise_v1"), "timed_surprise_v1");
+  assert.equal(safeExperiencePresetKey("future_preset_v9"), "classic_word_rise_v1");
+
+  const lumi = parseRpcLumi({
+    id: randomUUID(),
+    text: "First reveal",
+    secondaryText: "Second reveal",
+    experiencePresetKey: "timed_surprise_v1",
+    queuePosition: 2,
+    presentation: {},
+  });
+  assert.equal(lumi.experiencePresetKey, "timed_surprise_v1");
+  assert.equal(lumi.secondaryText, "Second reveal");
 });

@@ -23,6 +23,8 @@ type ResolveRpcResult = {
   lumi_id?: string | null;
   necklace_lumi_id?: string | null;
   lumi_text?: string | null;
+  experience_preset_key?: string | null;
+  secondary_text?: string | null;
   presentation?: {
     theme?: string | null;
     animation?: string | null;
@@ -47,7 +49,12 @@ export type PublicRecipientResolveResponse =
       status: "ready";
       revealSessionId: string;
       necklace: { displayName: string };
-      lumi: { id: string; text: string };
+      lumi: {
+        id: string;
+        text: string;
+        experiencePresetKey: string;
+        secondaryText?: string;
+      };
       presentation: {
         theme: string;
         animation: string;
@@ -164,6 +171,12 @@ export async function resolveNextRecipientTap(
       lumi: {
         id: lumiId,
         text: data.lumi_text,
+        experiencePresetKey: isNonEmptyString(data.experience_preset_key)
+          ? data.experience_preset_key
+          : "classic_word_rise_v1",
+        ...(isNonEmptyString(data.secondary_text)
+          ? { secondaryText: data.secondary_text }
+          : {}),
       },
       presentation: {
         theme: background,

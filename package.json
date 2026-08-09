@@ -15,6 +15,7 @@
     "test:reserve": "node --env-file=.env --import tsx --test --test-name-pattern=Reserve tests/recipient-tap.integration.test.ts tests/sender.integration.test.ts",
     "test:sender": "node --conditions react-server --env-file=.env --import tsx --test tests/sender.integration.test.ts",
     "test:shopify": "node --import tsx --test tests/shopify-webhook.test.ts",
+    "test:factory": "node --import tsx --test tests/factory-api.test.ts",
     "test:admin": "node --import tsx --test tests/admin.test.ts",
     "test:message-library": "node --import tsx --test tests/message-library.test.ts",
     "test:message-library:integration": "node --conditions react-server --env-file=.env --import tsx --test tests/message-library.integration.test.ts",

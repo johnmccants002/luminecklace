@@ -18,6 +18,7 @@ function signed(body: string) {
 function paidOrder(overrides: Record<string, unknown> = {}) {
   return JSON.stringify({
     id: "820982911946154508",
+    order_number: 1048,
     contact_email: "Buyer@Example.com",
     created_at: "2026-07-22T12:00:00Z",
     updated_at: "2026-07-22T12:01:00Z",
@@ -94,6 +95,7 @@ test("preserves large Shopify IDs and marks only exact eligible SKUs", () => {
   );
 
   assert.equal(parsed.order.shopify_order_id, "820982911946154508");
+  assert.equal(parsed.order.shopify_order_number, "1048");
   assert.equal(parsed.order.purchaser_email_normalized, "buyer@example.com");
   assert.equal(parsed.order.ingestion_outcome, "ready");
   assert.equal(parsed.order.total_price, "118.25");
