@@ -1060,7 +1060,7 @@ test("concurrent queue mutations allow one revision winner", async () => {
   }
 });
 
-test("Share to Lumi creates, replays, and preserves Instagram attachments", async () => {
+test("Share to Lumi persists websites while preserving replay and Instagram behavior", async () => {
   if (!(await hasSharedLinkSchema())) {
     console.log("[sender] shared-link migration not found; skipping live assertions.");
     return;
@@ -1075,7 +1075,7 @@ test("Share to Lumi creates, replays, and preserves Instagram attachments", asyn
     const clientRequestId = randomUUID();
     const payload = {
       clientRequestId,
-      url: "https://www.instagram.com/reel/example/?igsh=private&utm_source=share",
+      url: "https://BÜCHER.de/articles/lumi?from=share#details",
     };
 
     assert.equal(
@@ -1087,16 +1087,6 @@ test("Share to Lumi creates, replays, and preserves Instagram attachments", asyn
       ).status,
       400
     );
-    assert.equal(
-      (
-        await sharedLumiRequest(fixture.secondaryNecklaceId, token, {
-          ...payload,
-          url: "https://instagram.com.attacker.example/reel/example/",
-        })
-      ).status,
-      400
-    );
-
     const createdResponse = await sharedLumiRequest(
       fixture.secondaryNecklaceId,
       token,
@@ -1108,9 +1098,13 @@ test("Share to Lumi creates, replays, and preserves Instagram attachments", asyn
         id: string;
         text: string;
         attachment: {
+          type: string;
           contentKind: string;
           url: string;
           provider: string;
+          host: string;
+          ctaLabel: string;
+          openMode: string;
         };
       };
       queue: {
@@ -1124,11 +1118,11 @@ test("Share to Lumi creates, replays, and preserves Instagram attachments", asyn
     assert.equal(created.lumi.text, "This made me think of you.");
     assert.deepEqual(created.lumi.attachment, {
       type: "link",
-      provider: "instagram",
-      contentKind: "reel",
-      url: "https://instagram.com/reel/example/",
-      host: "instagram.com",
-      ctaLabel: "View on Instagram",
+      provider: "website",
+      contentKind: "link",
+      url: "https://xn--bcher-kva.de/articles/lumi?from=share#details",
+      host: "xn--bcher-kva.de",
+      ctaLabel: "Open website",
       openMode: "external",
     });
     assert.equal(created.queue.upNext[0].id, created.lumi.id);
@@ -1145,7 +1139,7 @@ test("Share to Lumi creates, replays, and preserves Instagram attachments", asyn
     assert.equal(replay.lumi.id, created.lumi.id);
     assert.equal(replay.queue.revision, created.queue.revision);
 
-    const [{ count }, revision] = await Promise.all([
+    const [{ count }, revision, persisted] = await Promise.all([
       admin
         .from("necklace_lumis")
         .select("id", { count: "exact", head: true })
@@ -1156,10 +1150,34 @@ test("Share to Lumi creates, replays, and preserves Instagram attachments", asyn
         .select("queue_revision")
         .eq("id", fixture.secondaryNecklaceId)
         .single(),
+      admin
+        .from("necklace_lumis")
+        .select("external_url, external_provider, external_content_kind")
+        .eq("id", created.lumi.id)
+        .single(),
     ]);
     assert.equal(count, 1);
     assert.ifError(revision.error);
     assert.equal(revision.data.queue_revision, created.queue.revision);
+    assert.ifError(persisted.error);
+    assert.deepEqual(persisted.data, {
+      external_url: "https://xn--bcher-kva.de/articles/lumi?from=share#details",
+      external_provider: "website",
+      external_content_kind: "link",
+    });
+
+    const lookalikeResponse = await sharedLumiRequest(
+      fixture.secondaryNecklaceId,
+      token,
+      {
+        clientRequestId: randomUUID(),
+        url: "https://instagram.com.attacker.net/reel/example/",
+      }
+    );
+    assert.equal(lookalikeResponse.status, 201);
+    const lookalike = (await lookalikeResponse.json()) as typeof created;
+    assert.equal(lookalike.lumi.attachment.provider, "website");
+    assert.equal(lookalike.lumi.attachment.ctaLabel, "Open website");
 
     assert.equal(
       (
@@ -1201,6 +1219,15 @@ test("Share to Lumi creates, replays, and preserves Instagram attachments", asyn
     const reserve = (await reserveResponse.json()) as typeof created;
     assert.equal(reserve.lumi.text, "Custom text");
     assert.equal(reserve.queue.reserve[0].id, reserve.lumi.id);
+    assert.deepEqual(reserve.lumi.attachment, {
+      type: "link",
+      provider: "instagram",
+      contentKind: "post",
+      url: "https://instagram.com/p/post-id/",
+      host: "instagram.com",
+      ctaLabel: "View on Instagram",
+      openMode: "external",
+    });
 
     const moved = await mutateSenderQueue(
       admin,

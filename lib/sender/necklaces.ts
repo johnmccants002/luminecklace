@@ -3,10 +3,11 @@ import {
   listSenderReserveSummaries,
   type SenderReserveSummary,
 } from "@/lib/sender/reserve";
-import type {
-  InstagramContentKind,
-  NormalizedInstagramLink,
-} from "@/lib/shared-links/instagram";
+import type { InstagramContentKind } from "@/lib/shared-links/instagram";
+import {
+  normalizeSharedUrl,
+  type NormalizedSharedLink,
+} from "@/lib/shared-links/public-url";
 import {
   isLumiReactionKey,
   type LumiRevealFeedback,
@@ -109,15 +110,25 @@ export type SenderLumi = {
   attachment?: LumiLinkAttachment;
 };
 
-export type LumiLinkAttachment = {
-  type: "link";
-  provider: "instagram";
-  contentKind: InstagramContentKind;
-  url: string;
-  host: "instagram.com";
-  ctaLabel: "View on Instagram";
-  openMode: "external";
-};
+export type LumiLinkAttachment =
+  | {
+      type: "link";
+      provider: "instagram";
+      contentKind: InstagramContentKind;
+      url: string;
+      host: "instagram.com";
+      ctaLabel: "View on Instagram";
+      openMode: "external";
+    }
+  | {
+      type: "link";
+      provider: "website";
+      contentKind: "link";
+      url: string;
+      host: string;
+      ctaLabel: "Open website";
+      openMode: "external";
+    };
 
 export type SenderQueueSection = "up_next" | "reserve";
 
@@ -853,26 +864,45 @@ function mapLinkAttachment(value: {
   contentKind?: unknown;
   url?: unknown;
 }): LumiLinkAttachment | undefined {
-  if (
-    value.provider !== "instagram" ||
-    typeof value.url !== "string" ||
-    !value.url.startsWith("https://instagram.com/") ||
-    typeof value.contentKind !== "string" ||
-    !["post", "reel", "story", "profile", "instagram_link"].includes(
-      value.contentKind
-    )
-  ) {
+  if (typeof value.url !== "string" || typeof value.contentKind !== "string") {
     return undefined;
   }
-  return {
-    type: "link",
-    provider: "instagram",
-    contentKind: value.contentKind as InstagramContentKind,
-    url: value.url,
-    host: "instagram.com",
-    ctaLabel: "View on Instagram",
-    openMode: "external",
-  };
+  try {
+    const normalized = normalizeSharedUrl(value.url);
+    if (normalized.url !== value.url || normalized.provider !== value.provider) {
+      return undefined;
+    }
+    if (normalized.provider === "website") {
+      if (value.contentKind !== "link") return undefined;
+      return {
+        type: "link",
+        provider: "website",
+        contentKind: "link",
+        url: normalized.url,
+        host: normalized.host,
+        ctaLabel: "Open website",
+        openMode: "external",
+      };
+    }
+    if (
+      !["post", "reel", "story", "profile", "link", "instagram_link"].includes(
+        value.contentKind
+      )
+    ) {
+      return undefined;
+    }
+    return {
+      type: "link",
+      provider: "instagram",
+      contentKind: value.contentKind as InstagramContentKind,
+      url: normalized.url,
+      host: "instagram.com",
+      ctaLabel: "View on Instagram",
+      openMode: "external",
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 function parseRpcQueue(value: unknown): SenderLumi[] {
@@ -1084,12 +1114,12 @@ export async function enqueueSenderLumi(
   };
 }
 
-export async function enqueueSharedInstagramLumi(
+export async function enqueueSharedLinkLumi(
   client: SupabaseClient,
   userId: string,
   necklaceId: string,
   clientRequestId: string,
-  link: NormalizedInstagramLink,
+  link: NormalizedSharedLink,
   text: string,
   destination: SenderQueueSection,
   presentation: NormalizedLumiPresentation = DEFAULT_LUMI_PRESENTATION

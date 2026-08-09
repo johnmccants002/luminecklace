@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 
 import { requireUser } from "@/lib/auth/requireUser";
 import {
-  enqueueSharedInstagramLumi,
+  enqueueSharedLinkLumi,
   normalizeLumiPresentation,
   normalizeQueueSection,
   normalizeSharedLumiText,
   SenderApiError,
 } from "@/lib/sender/necklaces";
-import { normalizeInstagramUrl } from "@/lib/shared-links/instagram";
+import { normalizeSharedUrl } from "@/lib/shared-links/public-url";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { getSupabaseConnectionErrorMessage } from "@/lib/supabase/env";
 
@@ -63,14 +63,14 @@ export async function POST(req: Request, context: RouteContext) {
 
     let link;
     try {
-      link = normalizeInstagramUrl(body.url);
+      link = normalizeSharedUrl(body.url);
     } catch (error) {
       throw new SenderApiError(
         error instanceof Error ? error.message : "url is invalid",
         400
       );
     }
-    const result = await enqueueSharedInstagramLumi(
+    const result = await enqueueSharedLinkLumi(
       supabaseAdmin,
       user.id,
       necklaceId,

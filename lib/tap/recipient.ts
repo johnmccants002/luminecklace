@@ -8,6 +8,7 @@ import {
   type LumiFontKey,
   type LumiLinkAttachment,
 } from "@/lib/sender/necklaces";
+import { normalizeSharedUrl } from "@/lib/shared-links/public-url";
 
 type RpcClient = {
   rpc: (
@@ -107,21 +108,42 @@ function parseRecipientAttachment(value: unknown): LumiLinkAttachment | undefine
     return undefined;
   }
   const attachment = value as Record<string, unknown>;
+  if (attachment.type !== "link" || attachment.openMode !== "external") {
+    return undefined;
+  }
+  if (attachment.provider === "instagram") {
+    if (
+      !["post", "reel", "story", "profile", "link", "instagram_link"].includes(
+        String(attachment.contentKind)
+      ) ||
+      typeof attachment.url !== "string" ||
+      !attachment.url.startsWith("https://instagram.com/") ||
+      attachment.host !== "instagram.com" ||
+      attachment.ctaLabel !== "View on Instagram"
+    ) {
+      return undefined;
+    }
+    return attachment as LumiLinkAttachment;
+  }
   if (
-    attachment.type !== "link" ||
-    attachment.provider !== "instagram" ||
-    !["post", "reel", "story", "profile", "instagram_link"].includes(
-      String(attachment.contentKind)
-    ) ||
+    attachment.provider !== "website" ||
+    attachment.contentKind !== "link" ||
     typeof attachment.url !== "string" ||
-    !attachment.url.startsWith("https://instagram.com/") ||
-    attachment.host !== "instagram.com" ||
-    attachment.ctaLabel !== "View on Instagram" ||
-    attachment.openMode !== "external"
+    typeof attachment.host !== "string" ||
+    attachment.ctaLabel !== "Open website"
   ) {
     return undefined;
   }
-  return attachment as LumiLinkAttachment;
+  try {
+    const normalized = normalizeSharedUrl(attachment.url);
+    return normalized.provider === "website" &&
+      normalized.url === attachment.url &&
+      normalized.host === attachment.host
+      ? (attachment as LumiLinkAttachment)
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function resolveNextRecipientTap(

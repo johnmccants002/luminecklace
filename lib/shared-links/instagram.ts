@@ -1,12 +1,13 @@
 import "server-only";
 
-export const INSTAGRAM_URL_MAX_LENGTH = 2048;
+export const SHARED_URL_MAX_BYTES = 4096;
 
 export const INSTAGRAM_CONTENT_KINDS = [
   "post",
   "reel",
   "story",
   "profile",
+  "link",
   "instagram_link",
 ] as const;
 
@@ -52,10 +53,10 @@ function classifyInstagramPath(pathname: string): InstagramContentKind {
   const segments = pathname.split("/").filter(Boolean);
   const first = segments[0]?.toLowerCase();
 
-  if (first === "p" && segments.length >= 2) return "post";
-  if ((first === "reel" || first === "tv") && segments.length >= 2) {
+  if ((first === "reel" || first === "reels") && segments.length >= 2) {
     return "reel";
   }
+  if ((first === "p" || first === "tv") && segments.length >= 2) return "post";
   if (first === "stories" && segments.length >= 2) return "story";
   if (
     segments.length === 1 &&
@@ -65,15 +66,15 @@ function classifyInstagramPath(pathname: string): InstagramContentKind {
   ) {
     return "profile";
   }
-  return "instagram_link";
+  return "link";
 }
 
 export function normalizeInstagramUrl(value: unknown): NormalizedInstagramLink {
   if (typeof value !== "string" || value.length === 0) {
     throw new Error("url is required");
   }
-  if (value.length > INSTAGRAM_URL_MAX_LENGTH) {
-    throw new Error("url must be 2,048 characters or fewer");
+  if (new TextEncoder().encode(value).byteLength > SHARED_URL_MAX_BYTES) {
+    throw new Error("url must be 4,096 UTF-8 bytes or fewer");
   }
 
   let parsed: URL;
@@ -114,8 +115,10 @@ export function normalizeInstagramUrl(value: unknown): NormalizedInstagramLink {
       : `${normalizedPath.replace(/\/+$/, "")}/`;
 
   const normalizedUrl = parsed.toString();
-  if (normalizedUrl.length > INSTAGRAM_URL_MAX_LENGTH) {
-    throw new Error("url must be 2,048 characters or fewer");
+  if (
+    new TextEncoder().encode(normalizedUrl).byteLength > SHARED_URL_MAX_BYTES
+  ) {
+    throw new Error("url must be 4,096 UTF-8 bytes or fewer");
   }
 
   return {
