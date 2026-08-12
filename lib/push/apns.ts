@@ -30,7 +30,29 @@ export type ApnsResult = {
   status: number;
   reason: string | null;
   apnsId: string | null;
+  retryAfter: string | null;
 };
+
+export function buildApnsRequest(input: {
+  deviceToken: string;
+  environment: ApnsEnvironment;
+  topic: string;
+  apnsId: string;
+  providerToken: string;
+}) {
+  return {
+    host: APNS_HOSTS[input.environment],
+    headers: {
+      ":method": "POST",
+      ":path": `/3/device/${input.deviceToken}`,
+      authorization: `bearer ${input.providerToken}`,
+      "apns-topic": input.topic,
+      "apns-push-type": "alert",
+      "apns-priority": "10",
+      "apns-id": input.apnsId,
+    },
+  };
+}
 
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -125,9 +147,16 @@ export async function sendApnsNotification(input: {
   }
   const environment = input.environment ?? defaultEnvironment();
   const providerToken = await getProviderToken();
+  const apnsRequest = buildApnsRequest({
+    deviceToken: input.deviceToken,
+    environment,
+    topic,
+    apnsId: input.apnsId,
+    providerToken,
+  });
 
   return new Promise<ApnsResult>((resolve, reject) => {
-    const session = connect(APNS_HOSTS[environment]);
+    const session = connect(apnsRequest.host);
     let settled = false;
     const finish = (callback: () => void) => {
       if (settled) return;
@@ -140,30 +169,28 @@ export async function sendApnsNotification(input: {
       finish(() => reject(new Error("APNs connection failed")));
     });
 
-    const request = session.request({
-      ":method": "POST",
-      ":path": `/3/device/${input.deviceToken}`,
-      authorization: `bearer ${providerToken}`,
-      "apns-topic": topic,
-      "apns-push-type": "alert",
-      "apns-priority": "10",
-      "apns-id": input.apnsId,
-    });
+    const request = session.request(apnsRequest.headers);
     request.setEncoding("utf8");
 
     let status = 0;
     let apnsId: string | null = null;
+    let retryAfter: string | null = null;
     let body = "";
     request.on("response", (headers) => {
       status = Number(headers[":status"] ?? 0);
       const responseId = headers["apns-id"];
       apnsId = typeof responseId === "string" ? responseId : null;
+      const retryHeader = headers["retry-after"];
+      retryAfter =
+        typeof retryHeader === "string" ? retryHeader.slice(0, 128) : null;
     });
     request.on("data", (chunk: string) => {
       if (body.length < 2048) body += chunk;
     });
     request.once("end", () => {
-      finish(() => resolve({ status, reason: parseReason(body), apnsId }));
+      finish(() =>
+        resolve({ status, reason: parseReason(body), apnsId, retryAfter })
+      );
     });
     request.once("error", () => {
       finish(() => reject(new Error("APNs request failed")));

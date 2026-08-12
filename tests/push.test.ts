@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { GET as getCron, isAuthorizedCronRequest } from "../app/api/cron/push/route";
 import { PUT as putDevice } from "../app/api/push/devices/route";
+import { buildApnsRequest } from "../lib/push/apns";
 import { dispatchPushDeliveries } from "../lib/push/dispatcher";
 import { buildApnsPayload, parsePushEventPayload } from "../lib/push/payloads";
 import {
@@ -110,9 +111,35 @@ test("notification payloads contain only lock-screen-safe event data", () => {
     "aps",
     "lumiId",
     "necklaceId",
-    "revealSessionId",
     "type",
   ]);
+  assert.equal(serialized.includes(UUIDS.reveal), false);
+  assert.equal("category" in payload.aps, false);
+});
+
+test("APNs requests select the device environment and required alert headers", () => {
+  for (const [environment, host] of [
+    ["sandbox", "https://api.sandbox.push.apple.com"],
+    ["production", "https://api.push.apple.com"],
+  ] as const) {
+    const request = buildApnsRequest({
+      deviceToken: TOKEN,
+      environment,
+      topic: "luminecklace.luminecklace",
+      apnsId: UUIDS.delivery,
+      providerToken: "test-provider-token",
+    });
+    assert.equal(request.host, host);
+    assert.deepEqual(request.headers, {
+      ":method": "POST",
+      ":path": `/3/device/${TOKEN}`,
+      authorization: "bearer test-provider-token",
+      "apns-topic": "luminecklace.luminecklace",
+      "apns-push-type": "alert",
+      "apns-priority": "10",
+      "apns-id": UUIDS.delivery,
+    });
+  }
 });
 
 function claimedDelivery() {
@@ -152,7 +179,12 @@ test("APNs success marks a claimed delivery sent", async () => {
   const finalizations: Array<Record<string, unknown>> = [];
   const summary = await dispatchPushDeliveries({
     client: fakeClient(finalizations),
-    send: async () => ({ status: 200, reason: null, apnsId: UUIDS.delivery }),
+    send: async () => ({
+      status: 200,
+      reason: null,
+      apnsId: UUIDS.delivery,
+      retryAfter: null,
+    }),
   });
   assert.deepEqual(summary, {
     claimed: 1,
@@ -169,18 +201,49 @@ test("temporary APNs rejection schedules exponential retry", async () => {
   const summary = await dispatchPushDeliveries({
     client: fakeClient(finalizations),
     random: () => 0,
-    send: async () => ({ status: 503, reason: "ServiceUnavailable", apnsId: null }),
+    send: async () => ({
+      status: 503,
+      reason: "ServiceUnavailable",
+      apnsId: null,
+      retryAfter: null,
+    }),
   });
   assert.equal(summary.retried, 1);
   assert.equal(finalizations[0].p_status, "retry");
   assert.equal(typeof finalizations[0].p_available_at, "string");
 });
 
+test("temporary APNs rejection respects Retry-After", async () => {
+  const finalizations: Array<Record<string, unknown>> = [];
+  const now = Date.UTC(2026, 7, 10, 12, 0, 0);
+  const summary = await dispatchPushDeliveries({
+    client: fakeClient(finalizations),
+    random: () => 0,
+    now: () => now,
+    send: async () => ({
+      status: 429,
+      reason: "TooManyRequests",
+      apnsId: null,
+      retryAfter: "120",
+    }),
+  });
+  assert.equal(summary.retried, 1);
+  assert.equal(
+    finalizations[0].p_available_at,
+    new Date(now + 120_000).toISOString()
+  );
+});
+
 test("invalid APNs token response is finalized without retry", async () => {
   const finalizations: Array<Record<string, unknown>> = [];
   const summary = await dispatchPushDeliveries({
     client: fakeClient(finalizations),
-    send: async () => ({ status: 410, reason: "Unregistered", apnsId: null }),
+    send: async () => ({
+      status: 410,
+      reason: "Unregistered",
+      apnsId: null,
+      retryAfter: null,
+    }),
   });
   assert.equal(summary.invalid, 1);
   assert.equal(finalizations[0].p_status, "invalid_token");
