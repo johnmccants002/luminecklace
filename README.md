@@ -485,9 +485,9 @@ the same Postgres transaction. Per-device `push_deliveries` are claimed with
 the first delivery attempt, and `/api/cron/push` recovers pending or retryable
 deliveries every five minutes.
 
-Push payloads contain only the event type and internal necklace, Lumi, and
-reveal-session UUIDs. They never include Lumi text, written responses, email
-addresses, NFC values, access tokens, or APNs device tokens.
+Push payloads contain only the event type and internal necklace and Lumi UUIDs.
+They never include Lumi text, written responses, email addresses, NFC values,
+access tokens, or APNs device tokens.
 
 ### Server environment
 
@@ -569,7 +569,8 @@ curl https://<host>/api/cron/push \
 ```
 
 Successful deliveries are retained as `sent`. APNs `429` and temporary server
-or HTTP/2 failures use exponential backoff with jitter for up to eight attempts.
+or HTTP/2 failures honor a valid `Retry-After` response and otherwise use
+exponential backoff with jitter for up to eight attempts.
 Permanent payload/configuration failures are marked `failed`. `Unregistered`,
 `ExpiredToken`, `BadDeviceToken`, `DeviceTokenNotForTopic`, and HTTP 410 mark the
 installation inactive so it is excluded from future events. A later successful

@@ -8,15 +8,6 @@ import {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const REACTION_EMOJI: Record<string, string> = {
-  heart: "❤️",
-  touched: "🥹",
-  laugh: "😂",
-  sparkle: "✨",
-  hug: "🤗",
-  wow: "😮",
-};
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -67,7 +58,6 @@ export function buildApnsPayload(
   const common = {
     sound: "default" as const,
     "thread-id": `necklace:${event.necklaceId}`,
-    category: "LUMI_ACTIVITY" as const,
   };
 
   let alert: { title: string; body: string };
@@ -77,10 +67,9 @@ export function buildApnsPayload(
       body: "Someone just revealed your message.",
     };
   } else if (eventType === "lumi.reacted") {
-    const emoji = REACTION_EMOJI[event.reaction ?? ""];
     alert = {
       title: "They reacted to your Lumi",
-      body: emoji ? `They reacted with ${emoji}.` : "They reacted to your Lumi.",
+      body: "They reacted to your Lumi.",
     };
   } else {
     alert = {
@@ -94,8 +83,5 @@ export function buildApnsPayload(
     type: eventType,
     necklaceId: event.necklaceId,
     lumiId: event.lumiId,
-    ...(event.revealSessionId
-      ? { revealSessionId: event.revealSessionId }
-      : {}),
   };
 }

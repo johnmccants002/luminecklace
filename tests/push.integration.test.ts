@@ -106,6 +106,7 @@ test("device ownership, idempotency, deletion, and preferences are enforced", as
         )
       );
       assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { ok: true });
     }
     let stored = await admin
       .from("push_devices")
@@ -133,19 +134,20 @@ test("device ownership, idempotency, deletion, and preferences are enforced", as
       .eq("device_token", token);
     assert.deepEqual(stored.data, [{ user_id: second.id, is_active: true }]);
 
-    assert.equal(
-      (
-        await deleteDevice(
-          jsonRequest(
-            "http://localhost/api/push/devices",
-            "DELETE",
-            firstAccessToken,
-            { deviceToken: token, environment: "sandbox" }
-          )
-        )
-      ).status,
-      200
+    const firstDelete = await deleteDevice(
+      jsonRequest(
+        "http://localhost/api/push/devices",
+        "DELETE",
+        firstAccessToken,
+        {
+          deviceToken: token,
+          environment: "sandbox",
+          bundleId: "luminecklace.luminecklace",
+        }
+      )
     );
+    assert.equal(firstDelete.status, 200);
+    assert.deepEqual(await firstDelete.json(), { ok: true });
     stored = await admin
       .from("push_devices")
       .select("user_id, is_active")
@@ -169,7 +171,11 @@ test("device ownership, idempotency, deletion, and preferences are enforced", as
         "http://localhost/api/push/preferences",
         "PATCH",
         firstAccessToken,
-        { responsesEnabled: false }
+        {
+          revealsEnabled: true,
+          reactionsEnabled: true,
+          responsesEnabled: false,
+        }
       )
     );
     assert.deepEqual(await updated.json(), {
@@ -178,14 +184,20 @@ test("device ownership, idempotency, deletion, and preferences are enforced", as
       responsesEnabled: false,
     });
 
-    await deleteDevice(
+    const secondDelete = await deleteDevice(
       jsonRequest(
         "http://localhost/api/push/devices",
         "DELETE",
         secondAccessToken,
-        { deviceToken: token, environment: "sandbox" }
+        {
+          deviceToken: token,
+          environment: "sandbox",
+          bundleId: "luminecklace.luminecklace",
+        }
       )
     );
+    assert.equal(secondDelete.status, 200);
+    assert.deepEqual(await secondDelete.json(), { ok: true });
     stored = await admin
       .from("push_devices")
       .select("user_id, is_active")

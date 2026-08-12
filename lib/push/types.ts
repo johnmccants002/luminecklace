@@ -41,10 +41,8 @@ export type ApnsPayload = {
     alert: { title: string; body: string };
     sound: "default";
     "thread-id": string;
-    category: "LUMI_ACTIVITY";
   };
   type: PushEventType;
   necklaceId: string;
   lumiId: string;
-  revealSessionId?: string;
 };

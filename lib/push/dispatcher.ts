@@ -62,10 +62,31 @@ function sanitizedReason(reason: string | null, fallback: string): string {
   return (reason ?? fallback).replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 128);
 }
 
-function retryAt(attemptCount: number, random: () => number): string {
+function retryAfterTimestamp(value: string | null, now: number): number | null {
+  if (!value) return null;
+  const normalized = value.trim();
+  if (/^\d+$/.test(normalized)) {
+    const seconds = Number(normalized);
+    const timestamp = now + seconds * 1000;
+    return Number.isSafeInteger(seconds) && Number.isSafeInteger(timestamp)
+      ? timestamp
+      : null;
+  }
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function retryAt(
+  attemptCount: number,
+  random: () => number,
+  now: number,
+  retryAfter: string | null = null
+): string {
   const exponentialSeconds = Math.min(60 * 60, 30 * 2 ** (attemptCount - 1));
   const jitterSeconds = Math.floor(random() * 16);
-  return new Date(Date.now() + (exponentialSeconds + jitterSeconds) * 1000).toISOString();
+  const fallback = now + (exponentialSeconds + jitterSeconds) * 1000;
+  const requested = retryAfterTimestamp(retryAfter, now);
+  return new Date(Math.max(fallback, requested ?? fallback)).toISOString();
 }
 
 async function finalize(
@@ -97,10 +118,12 @@ export async function dispatchPushDeliveries(options: {
   send?: SendApns;
   batchSize?: number;
   random?: () => number;
+  now?: () => number;
 } = {}): Promise<DispatchSummary> {
   const client = options.client ?? supabaseAdmin;
   const send = options.send ?? sendApnsNotification;
   const random = options.random ?? Math.random;
+  const now = options.now ?? Date.now;
   const batchSize = Math.min(Math.max(options.batchSize ?? 25, 1), 100);
   const summary: DispatchSummary = {
     claimed: 0,
@@ -147,7 +170,7 @@ export async function dispatchPushDeliveries(options: {
                 ? "APNs transport retry limit reached"
                 : "Temporary APNs transport failure",
             availableAt: canRetry
-              ? retryAt(delivery.attemptCount, random)
+              ? retryAt(delivery.attemptCount, random, now())
               : null,
           })
         ) {
@@ -195,7 +218,12 @@ export async function dispatchPushDeliveries(options: {
             apnsId: result.apnsId,
             errorCode,
             errorMessage: "APNs temporarily rejected the delivery",
-            availableAt: retryAt(delivery.attemptCount, random),
+            availableAt: retryAt(
+              delivery.attemptCount,
+              random,
+              now(),
+              result.retryAfter
+            ),
           })
         ) {
           summary.retried += 1;
