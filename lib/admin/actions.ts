@@ -9,9 +9,20 @@ import {
   categoryKeyFromName,
   parseCatalogMessageForm,
 } from "@/lib/admin/message-catalog";
+import {
+  parseComplimentaryOrderCreationResult,
+  parseComplimentaryOrderForm,
+} from "@/lib/admin/complimentary-orders";
 import { MAX_IMPORT_BYTES, parseInventoryImport } from "@/lib/admin/message-import";
-import { requestShopifyInvitationRecovery } from "@/lib/shopify/orders";
-import { isValidEmail, normalizeEmail } from "@/lib/shopify/webhook";
+import {
+  provisionOrderOwner,
+  requestOrderOwnerInvitationRecovery,
+} from "@/lib/shopify/orders";
+import {
+  isValidEmail,
+  normalizeEmail,
+  parseShopifyLumiSkus,
+} from "@/lib/shopify/webhook";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -235,7 +246,7 @@ export async function recoverCustomerInvitation(formData: FormData) {
   const email = formData.get("email");
   if (!isValidEmail(email)) throw new Error("A valid customer email is required");
 
-  await requestShopifyInvitationRecovery(email);
+  await requestOrderOwnerInvitationRecovery(email);
   await writeAdminAuditLog({
     adminUserId: user.id,
     action: "customer.invitation_recovery_requested",
@@ -300,6 +311,117 @@ export async function setCustomerStatus(formData: FormData) {
     details: { status },
   });
   revalidatePath(`/admin/customers/${customerId}`);
+}
+
+async function finalizeComplimentaryOrder(
+  adminUserId: string,
+  orderId: string,
+  purchaserEmail: string
+) {
+  const owner = await provisionOrderOwner(purchaserEmail);
+  const { error } = await supabaseAdmin.rpc(
+    "admin_finalize_complimentary_order",
+    {
+      p_admin_user_id: adminUserId,
+      p_order_id: orderId,
+      p_owner_user_id: owner.authUserId,
+    }
+  );
+  if (error) throw new Error("Unable to release complimentary order to production");
+  return owner;
+}
+
+export async function createComplimentaryOrder(formData: FormData) {
+  const { user } = await requireAdmin();
+  const eligibleSkus = parseShopifyLumiSkus(process.env.SHOPIFY_LUMI_SKUS);
+  const input = parseComplimentaryOrderForm(formData, eligibleSkus);
+  const { data, error } = await supabaseAdmin.rpc(
+    "admin_create_complimentary_order",
+    {
+      p_admin_user_id: user.id,
+      p_idempotency_key: input.idempotencyKey,
+      p_purchaser_email: input.purchaserEmail,
+      p_purchaser_name: input.purchaserName,
+      p_sku: input.sku,
+      p_quantity: input.quantity,
+      p_internal_note: input.internalNote,
+    }
+  );
+  if (error) throw new Error("Unable to create complimentary order");
+  const created = parseComplimentaryOrderCreationResult(data);
+
+  try {
+    await finalizeComplimentaryOrder(
+      user.id,
+      created.order_id,
+      input.purchaserEmail
+    );
+  } catch (provisioningError) {
+    await writeAdminAuditLog({
+      adminUserId: user.id,
+      action: "complimentary_order.provisioning_failed",
+      resourceType: "order",
+      resourceId: created.order_id,
+      correlationId: input.idempotencyKey,
+      details: {
+        errorType:
+          provisioningError instanceof Error
+            ? provisioningError.name
+            : "unknown",
+      },
+    });
+    redirect(`/admin/orders/${created.order_id}?provisioning=failed`);
+  }
+
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/customers");
+  redirect(`/admin/orders/${created.order_id}?created=1`);
+}
+
+export async function retryComplimentaryOrderProvisioning(formData: FormData) {
+  const { user } = await requireAdmin();
+  const orderId = requiredUuid(formData, "orderId");
+  const result = await supabaseAdmin
+    .from("orders")
+    .select("id, order_source, purchaser_email_normalized, production_state")
+    .eq("id", orderId)
+    .maybeSingle();
+  if (result.error || !result.data || result.data.order_source !== "complimentary") {
+    throw new Error("Complimentary order not found");
+  }
+  if (result.data.production_state === "cancelled") {
+    throw new Error("Cancelled complimentary orders cannot be retried");
+  }
+  const email = normalizeEmail(result.data.purchaser_email_normalized);
+  if (!email) throw new Error("Complimentary order has no valid owner email");
+
+  await finalizeComplimentaryOrder(user.id, orderId, email);
+  revalidatePath("/admin/orders");
+  revalidatePath(`/admin/orders/${orderId}`);
+  revalidatePath("/admin/customers");
+  redirect(`/admin/orders/${orderId}?provisioning=ready`);
+}
+
+export async function cancelComplimentaryOrder(formData: FormData) {
+  const { user } = await requireAdmin();
+  const orderId = requiredUuid(formData, "orderId");
+  const { error } = await supabaseAdmin.rpc(
+    "admin_cancel_complimentary_order",
+    {
+      p_admin_user_id: user.id,
+      p_order_id: orderId,
+    }
+  );
+  if (error) {
+    throw new Error(
+      error.message.includes("assigned necklaces")
+        ? "Unlink assigned necklaces before cancelling this order"
+        : "Unable to cancel complimentary order"
+    );
+  }
+  revalidatePath("/admin/orders");
+  revalidatePath(`/admin/orders/${orderId}`);
+  redirect(`/admin/orders/${orderId}?cancelled=1`);
 }
 
 export async function unlinkNecklace(formData: FormData) {

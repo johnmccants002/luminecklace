@@ -17,12 +17,17 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 
 const FACTORY_ORDER_SELECT = `
   id,
+  order_source,
+  factory_reference,
+  production_state,
+  purchaser_name,
   shopify_order_id,
   shopify_order_number,
   purchaser_email_normalized,
   purchaser_auth_user_id,
   financial_status,
   ingestion_outcome,
+  created_at,
   shopify_created_at,
   currency,
   total_price,
@@ -50,18 +55,16 @@ export async function listFactoryOrders(
   let query = supabaseAdmin
     .from("orders")
     .select(FACTORY_ORDER_SELECT, { count: "exact" })
-    .eq("financial_status", "paid")
-    .is("cancelled_at", null)
-    .in("ingestion_outcome", ["ready", "manual_review"])
+    .in("production_state", ["queued", "manual_review"])
     .eq("order_items.is_lumi_eligible", true)
-    .order("shopify_created_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
     .order("id", { ascending: false })
     .range(from, to);
 
   if (input.search) {
     const value = input.search;
     query = query.or(
-      `shopify_order_number.ilike.%${value}%,shopify_order_id.ilike.%${value}%,purchaser_email_normalized.ilike.%${value}%`
+      `factory_reference.ilike.%${value}%,purchaser_name.ilike.%${value}%,shopify_order_number.ilike.%${value}%,shopify_order_id.ilike.%${value}%,purchaser_email_normalized.ilike.%${value}%`
     );
   }
 
@@ -86,9 +89,7 @@ export async function getFactoryOrderById(
     .from("orders")
     .select(FACTORY_ORDER_SELECT)
     .eq("id", id)
-    .eq("financial_status", "paid")
-    .is("cancelled_at", null)
-    .in("ingestion_outcome", ["ready", "manual_review"])
+    .in("production_state", ["queued", "manual_review"])
     .eq("order_items.is_lumi_eligible", true)
     .maybeSingle();
 
@@ -104,12 +105,10 @@ export async function getFactoryOrderByNumber(
   const { data, error } = await supabaseAdmin
     .from("orders")
     .select(FACTORY_ORDER_SELECT)
-    .eq("financial_status", "paid")
-    .is("cancelled_at", null)
-    .in("ingestion_outcome", ["ready", "manual_review"])
+    .in("production_state", ["queued", "manual_review"])
     .eq("order_items.is_lumi_eligible", true)
     .or(
-      `shopify_order_number.eq.${orderNumber},shopify_order_id.eq.${orderNumber}`
+      `factory_reference.eq.${orderNumber},shopify_order_number.eq.${orderNumber},shopify_order_id.eq.${orderNumber}`
     )
     .limit(2);
 

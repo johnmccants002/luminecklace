@@ -32,11 +32,11 @@ export async function GET(req: Request) {
   }
 
   const { error: attachError } = await supabase.rpc(
-    "attach_confirmed_shopify_orders",
+    "attach_confirmed_orders",
     { p_auth_user_id: data.user.id }
   );
   if (attachError) {
-    console.error("Failed to attach confirmed Shopify orders", attachError);
+    console.error("Failed to attach confirmed orders", attachError);
     return NextResponse.redirect(errorUrl);
   }
 

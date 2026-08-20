@@ -92,8 +92,8 @@ POST /api/auth/invitations/recover
 ```
 
 The response is intentionally non-enumerating. Recovery only sends for an
-unconfirmed Auth user with an eligible paid order, never creates a new user,
-and has a persisted per-email cooldown.
+unconfirmed Auth user with an eligible queued order (Shopify or complimentary),
+never creates a new user, and has a persisted per-email cooldown.
 
 ### Deferred Shopify events
 
@@ -120,6 +120,29 @@ The admin migration adds server-controlled roles and append-only audit logs;
 inventory state and purchased-unit allocation; transactional assignment,
 transfer, and unlink functions; Lumi-owned message templates and import
 history; and indexes for operational search.
+
+### Complimentary gift orders
+
+Apply `20260818120000_complimentary_orders.sql` before deploying the application
+code; the Orders admin page and generalized account-confirmation routes depend
+on its new columns and RPCs.
+
+Administrators can create non-Shopify gift orders from `/admin/orders`. Enter
+the friend's name and email, select an eligible Lumi SKU and quantity, and add
+an optional internal note. Lumi reuses an existing Auth account or sends an
+account setup invitation immediately, then releases the order to the factory
+queue under a `GIFT-000001` style reference. The friend—not the administrator—
+owns and controls every necklace allocated to that order.
+
+Complimentary orders do not contain Shopify payment data or webhook delivery
+records. Failed invitations remain outside the factory queue and can be
+retried from the order detail page. Unassigned complimentary orders can be
+cancelled; allocated necklaces must be unlinked first.
+
+After applying the migration to a disposable test project, set
+`COMPLIMENTARY_TEST_ADMIN_USER_ID` to an existing `super_admin` and run
+`npm run test:complimentary:integration`. The test exercises append-only audit
+logging, so it intentionally requires an explicitly selected test admin.
 
 ### Grant the first super administrator
 

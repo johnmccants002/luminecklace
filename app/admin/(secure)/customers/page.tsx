@@ -17,7 +17,7 @@ export default async function CustomersPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Customers" description="Search profiles, Shopify purchasers, and necklace ownership." />
+      <PageHeader title="Customers" description="Search profiles, order owners, and necklace ownership." />
       <Card>
         <form className="flex flex-col gap-3 sm:flex-row" role="search">
           <label className="sr-only" htmlFor="customer-search">Search customers</label>
@@ -25,7 +25,7 @@ export default async function CustomersPage({
             id="customer-search"
             name="q"
             defaultValue={query}
-            placeholder="Name, email, Shopify order, necklace or NFC tag"
+            placeholder="Name, email, order reference, necklace or NFC tag"
             className={fieldClass}
           />
           <button className="h-10 rounded-full bg-[#2a1214] px-6 text-sm font-semibold text-white">Search</button>
@@ -69,4 +69,3 @@ export default async function CustomersPage({
     </div>
   );
 }
-

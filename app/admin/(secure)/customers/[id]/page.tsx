@@ -45,17 +45,17 @@ export default async function CustomerDetailPage({
           </Card>
 
           <Card>
-            <h2 className="mb-4 font-serif text-xl">Shopify orders and purchased units</h2>
+            <h2 className="mb-4 font-serif text-xl">Orders and production units</h2>
             {customer.orders.length ? (
               <div className="overflow-x-auto">
                 <table className={tableClass}>
-                  <thead><tr><th>Order</th><th>Payment</th><th>Provisioning</th><th>Eligible units</th><th>Date</th></tr></thead>
+                  <thead><tr><th>Order</th><th>Source</th><th>Production</th><th>Eligible units</th><th>Date</th></tr></thead>
                   <tbody>
                     {customer.orders.map((order) => (
                       <tr key={order.id}>
-                        <td><Link className="font-semibold hover:underline" href={`/admin/orders/${order.id}`}>#{order.shopify_order_id ?? "—"}</Link></td>
-                        <td><Badge tone={order.financial_status === "paid" ? "success" : "neutral"}>{order.financial_status ?? "—"}</Badge></td>
-                        <td>{order.ingestion_outcome}</td>
+                        <td><Link className="font-semibold hover:underline" href={`/admin/orders/${order.id}`}>{order.factory_reference ?? order.shopify_order_id ?? "—"}</Link></td>
+                        <td><Badge tone={order.order_source === "complimentary" ? "warning" : "neutral"}>{order.order_source}</Badge></td>
+                        <td>{order.production_state}</td>
                         <td>{customer.orderItems.filter((item) => item.order_id === order.id && item.is_lumi_eligible).reduce((sum, item) => sum + item.quantity, 0)}</td>
                         <td>{formatDate(order.shopify_created_at ?? order.created_at)}</td>
                       </tr>
@@ -63,7 +63,7 @@ export default async function CustomerDetailPage({
                   </tbody>
                 </table>
               </div>
-            ) : <EmptyState>No linked Shopify orders.</EmptyState>}
+            ) : <EmptyState>No linked orders.</EmptyState>}
           </Card>
 
           <Card>

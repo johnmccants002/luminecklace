@@ -27,12 +27,17 @@ export type FactoryOrderItemRow = {
 
 export type FactoryOrderRow = {
   id: string;
-  shopify_order_id: string;
+  order_source: string;
+  factory_reference: string | null;
+  production_state: string;
+  purchaser_name: string | null;
+  shopify_order_id: string | null;
   shopify_order_number: string | null;
   purchaser_email_normalized: string | null;
   purchaser_auth_user_id: string | null;
   financial_status: string | null;
   ingestion_outcome: string;
+  created_at: string;
   shopify_created_at: string | null;
   currency: string | null;
   total_price: string | number | null;
@@ -83,14 +88,17 @@ export function serializeFactoryOrderSummary(
 
   return {
     id: row.id,
-    orderNumber: row.shopify_order_number ?? row.shopify_order_id,
+    orderNumber:
+      row.factory_reference ?? row.shopify_order_number ?? row.shopify_order_id ?? row.id,
+    source: row.order_source === "complimentary" ? "complimentary" : "shopify",
     customer: {
-      // Purchaser names are not currently persisted by paid-order ingestion.
-      name: null,
+      name: row.purchaser_name,
       email: row.purchaser_email_normalized,
     },
+    createdAt: row.shopify_created_at ?? row.created_at,
     shopifyCreatedAt: row.shopify_created_at,
-    financialStatus: row.financial_status ?? "paid",
+    financialStatus:
+      row.order_source === "complimentary" ? null : (row.financial_status ?? "paid"),
     currency: row.currency,
     totalPrice: row.total_price === null ? null : String(row.total_price),
     lumiUnits: {
@@ -134,13 +142,17 @@ export function serializeFactoryOrderDetail(
 
   return {
     id: row.id,
-    orderNumber: row.shopify_order_number ?? row.shopify_order_id,
+    orderNumber:
+      row.factory_reference ?? row.shopify_order_number ?? row.shopify_order_id ?? row.id,
+    source: row.order_source === "complimentary" ? "complimentary" : "shopify",
     customer: {
-      name: null,
+      name: row.purchaser_name,
       email: row.purchaser_email_normalized,
       authUserId: row.purchaser_auth_user_id,
     },
-    financialStatus: row.financial_status ?? "paid",
+    financialStatus:
+      row.order_source === "complimentary" ? null : (row.financial_status ?? "paid"),
+    createdAt: row.shopify_created_at ?? row.created_at,
     shopifyCreatedAt: row.shopify_created_at,
     factoryStatus: deriveFactoryStatus(row.ingestion_outcome, units),
     items: items.map(serializeItem),
