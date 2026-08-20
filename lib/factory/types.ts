@@ -5,6 +5,8 @@ export type FactoryStatus =
   | "completed"
   | "manual_review";
 
+export type FactoryOrderSource = "shopify" | "complimentary";
+
 export type FactoryOrderUnit = {
   id: string;
   unitOrdinal: number;
@@ -29,9 +31,11 @@ export type FactoryOrderCustomer = {
 export type FactoryOrderSummary = {
   id: string;
   orderNumber: string;
+  source: FactoryOrderSource;
   customer: FactoryOrderCustomer;
+  createdAt: string;
   shopifyCreatedAt: string | null;
-  financialStatus: string;
+  financialStatus: string | null;
   currency: string | null;
   totalPrice: string | null;
   lumiUnits: {
@@ -45,10 +49,12 @@ export type FactoryOrderSummary = {
 export type FactoryOrderDetail = {
   id: string;
   orderNumber: string;
+  source: FactoryOrderSource;
   customer: FactoryOrderCustomer & {
     authUserId: string | null;
   };
-  financialStatus: string;
+  financialStatus: string | null;
+  createdAt: string;
   shopifyCreatedAt: string | null;
   factoryStatus: FactoryStatus;
   items: FactoryOrderItem[];

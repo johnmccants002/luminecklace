@@ -23,7 +23,9 @@ export async function listCustomers(search: string, page: number) {
       supabaseAdmin
         .from("orders")
         .select("purchaser_auth_user_id")
-        .or(`shopify_order_id.ilike.%${term}%,purchaser_email_normalized.ilike.%${term}%`)
+        .or(
+          `factory_reference.ilike.%${term}%,shopify_order_id.ilike.%${term}%,purchaser_name.ilike.%${term}%,purchaser_email_normalized.ilike.%${term}%`
+        )
         .not("purchaser_auth_user_id", "is", null)
         .limit(500),
       UUID_PATTERN.test(term)
@@ -117,7 +119,9 @@ export async function getCustomerDetail(customerId: string) {
     supabaseAdmin.auth.admin.getUserById(customerId),
     supabaseAdmin
       .from("orders")
-      .select("id, shopify_order_id, financial_status, ingestion_outcome, shopify_created_at, created_at")
+      .select(
+        "id, order_source, factory_reference, production_state, shopify_order_id, financial_status, ingestion_outcome, shopify_created_at, created_at"
+      )
       .eq("purchaser_auth_user_id", customerId)
       .order("created_at", { ascending: false }),
     supabaseAdmin

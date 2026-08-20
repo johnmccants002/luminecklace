@@ -9,7 +9,7 @@ const FACTORY_STATUSES = new Set<FactoryStatus>([
 ]);
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const ORDER_NUMBER_PATTERN = /^\d{1,32}$/;
+const ORDER_NUMBER_PATTERN = /^(?:\d{1,32}|GIFT-\d{6,12})$/i;
 
 export class FactoryApiError extends Error {
   constructor(
@@ -80,7 +80,7 @@ export function parseFactoryOrderId(value: string): string {
 }
 
 export function parseFactoryOrderNumber(value: string | null): string {
-  const normalized = value?.trim().replace(/^#/, "") ?? "";
+  const normalized = value?.trim().replace(/^#/, "").toUpperCase() ?? "";
   if (!ORDER_NUMBER_PATTERN.test(normalized)) {
     throw new FactoryApiError("A valid orderNumber is required", 400);
   }

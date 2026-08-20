@@ -23,12 +23,17 @@ const ORDER_ID = "00000000-0000-4000-8000-000000000001";
 function orderRow(overrides: Partial<FactoryOrderRow> = {}): FactoryOrderRow {
   return {
     id: ORDER_ID,
+    order_source: "shopify",
+    factory_reference: "1048",
+    production_state: "queued",
+    purchaser_name: null,
     shopify_order_id: "820982911946154508",
     shopify_order_number: "1048",
     purchaser_email_normalized: "buyer@example.com",
     purchaser_auth_user_id: "00000000-0000-4000-8000-000000000002",
     financial_status: "paid",
     ingestion_outcome: "ready",
+    created_at: "2026-08-09T12:00:01Z",
     shopify_created_at: "2026-08-09T12:00:00Z",
     currency: "USD",
     total_price: "49.00",
@@ -156,6 +161,32 @@ test("factory order detail returns only eligible line items and units", () => {
     allocationStatus: "unassigned",
   });
   assert.equal(result.factoryStatus, "needs_nfc");
+  assert.equal(result.source, "shopify");
+  assert.equal(result.createdAt, "2026-08-09T12:00:00Z");
+});
+
+test("factory serializers expose complimentary gifts without payment data", () => {
+  const result = serializeFactoryOrderSummary(
+    orderRow({
+      order_source: "complimentary",
+      factory_reference: "GIFT-000001",
+      purchaser_name: "Avery Friend",
+      shopify_order_id: null,
+      shopify_order_number: null,
+      shopify_created_at: null,
+      financial_status: null,
+      currency: null,
+      total_price: null,
+    })
+  );
+  assert.ok(result);
+  assert.equal(result.orderNumber, "GIFT-000001");
+  assert.equal(result.source, "complimentary");
+  assert.equal(result.customer.name, "Avery Friend");
+  assert.equal(result.createdAt, "2026-08-09T12:00:01Z");
+  assert.equal(result.shopifyCreatedAt, null);
+  assert.equal(result.financialStatus, null);
+  assert.equal(result.totalPrice, null);
 });
 
 test("invalid factory order id returns 404 without querying data", async () => {
@@ -192,6 +223,24 @@ test("factory lookup resolves a normalized order number", async () => {
   assert.equal(response.status, 200);
   assert.equal(received, "1048");
   assert.equal((await response.json()).order.orderNumber, "1048");
+});
+
+test("factory lookup accepts normalized complimentary references", async () => {
+  let received = "";
+  const handler = createFactoryOrderLookupHandler({
+    authorize: async () => undefined,
+    getOrder: async (orderNumber) => {
+      received = orderNumber;
+      return detail();
+    },
+  });
+  const response = await handler(
+    new Request(
+      "http://localhost/api/factory/orders/lookup?orderNumber=gift-000001"
+    )
+  );
+  assert.equal(response.status, 200);
+  assert.equal(received, "GIFT-000001");
 });
 
 test("factory search strips PostgREST control characters and caps limits", () => {

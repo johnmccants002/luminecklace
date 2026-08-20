@@ -92,7 +92,7 @@ async function finishInvitation(
   errorMessage: string | null
 ) {
   const { data, error } = await supabaseAdmin.rpc(
-    "finish_shopify_account_invitation",
+    "finish_account_invitation",
     {
       p_email: email,
       p_lease_token: leaseToken,
@@ -104,6 +104,73 @@ async function finishInvitation(
     throw new Error(`Failed to finalize account invitation: ${error.message}`);
   }
   return data;
+}
+
+export type OrderOwnerProvisioningResult = {
+  action: ProvisioningResult["action"];
+  authUserId: string;
+};
+
+export async function provisionOrderOwner(
+  emailValue: string
+): Promise<OrderOwnerProvisioningResult> {
+  const email = normalizeEmail(emailValue);
+  if (!email) {
+    throw new Error("A valid owner email is required");
+  }
+
+  const leaseToken = randomUUID();
+  const { data: provisionData, error: provisionError } = await supabaseAdmin.rpc(
+    "begin_account_provisioning",
+    {
+      p_email: email,
+      p_lease_token: leaseToken,
+      p_lease_seconds: 90,
+    }
+  );
+  if (provisionError) {
+    throw new Error(`Failed to begin account provisioning: ${provisionError.message}`);
+  }
+
+  const provisioning = asProvisioningResult(provisionData);
+  if (provisioning.action === "busy") {
+    throw new Error("Account provisioning is currently leased by another request");
+  }
+
+  let authUserId = provisioning.auth_user_id;
+  if (provisioning.action === "invite") {
+    const { data: inviteData, error: inviteError } =
+      await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+        redirectTo: `${SITE_URL}/auth/set-password`,
+      });
+
+    if (inviteError || !inviteData.user) {
+      const { data: existingData, error: existingError } = await supabaseAdmin.rpc(
+        "find_auth_user_by_email",
+        { p_email: email }
+      );
+      const existing = Array.isArray(existingData) ? existingData[0] : null;
+
+      if (!existingError && existing && typeof existing.auth_user_id === "string") {
+        const existingAuthUserId = existing.auth_user_id;
+        authUserId = existingAuthUserId;
+        await finishInvitation(email, leaseToken, existingAuthUserId, null);
+      } else {
+        const message = inviteError?.message ?? "Invitation did not return a user";
+        await finishInvitation(email, leaseToken, null, message);
+        throw new Error(`Failed to invite order owner: ${message}`);
+      }
+    } else {
+      authUserId = inviteData.user.id;
+      await finishInvitation(email, leaseToken, authUserId, null);
+    }
+  }
+
+  if (!authUserId) {
+    throw new Error("Account provisioning did not return an owner");
+  }
+
+  return { action: provisioning.action, authUserId };
 }
 
 export async function processShopifyPaidOrder(
@@ -147,51 +214,8 @@ export async function processShopifyPaidOrder(
     throw new Error("Ready Shopify order is missing its normalized email");
   }
 
-  const leaseToken = randomUUID();
-
   try {
-    const { data: provisionData, error: provisionError } = await supabaseAdmin.rpc(
-      "begin_shopify_account_provisioning",
-      {
-        p_email: email,
-        p_lease_token: leaseToken,
-        p_lease_seconds: 90,
-      }
-    );
-    if (provisionError) {
-      throw new Error(`Failed to begin account provisioning: ${provisionError.message}`);
-    }
-
-    const provisioning = asProvisioningResult(provisionData);
-
-    if (provisioning.action === "busy") {
-      throw new Error("Account provisioning is currently leased by another delivery");
-    }
-
-    if (provisioning.action === "invite") {
-      const { data: inviteData, error: inviteError } =
-        await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-          redirectTo: `${SITE_URL}/auth/set-password`,
-        });
-
-      if (inviteError || !inviteData.user) {
-        const { data: existingData, error: existingError } = await supabaseAdmin.rpc(
-          "find_shopify_auth_user",
-          { p_email: email }
-        );
-        const existing = Array.isArray(existingData) ? existingData[0] : null;
-
-        if (!existingError && existing && typeof existing.auth_user_id === "string") {
-          await finishInvitation(email, leaseToken, existing.auth_user_id, null);
-        } else {
-          const message = inviteError?.message ?? "Invitation did not return a user";
-          await finishInvitation(email, leaseToken, null, message);
-          throw new Error(`Failed to invite Shopify purchaser: ${message}`);
-        }
-      } else {
-        await finishInvitation(email, leaseToken, inviteData.user.id, null);
-      }
-    }
+    const provisioning = await provisionOrderOwner(email);
 
     await completeDelivery(shopDomain, webhookId);
     return { result: provisioning.action === "confirmed" ? "linked" : "provisioned" };
@@ -201,14 +225,14 @@ export async function processShopifyPaidOrder(
   }
 }
 
-export async function requestShopifyInvitationRecovery(emailValue: string) {
+export async function requestOrderOwnerInvitationRecovery(emailValue: string) {
   const email = normalizeEmail(emailValue);
   if (!email) {
     return;
   }
 
   const { data: allowed, error } = await supabaseAdmin.rpc(
-    "begin_shopify_invitation_recovery",
+    "begin_invitation_recovery",
     {
       p_email: email,
       p_cooldown_seconds: 300,
@@ -228,7 +252,7 @@ export async function requestShopifyInvitationRecovery(emailValue: string) {
   });
 
   if (emailError) {
-    await supabaseAdmin.rpc("fail_shopify_invitation_recovery", {
+    await supabaseAdmin.rpc("fail_invitation_recovery", {
       p_email: email,
     });
     console.error("Failed to send Shopify invitation recovery email", {

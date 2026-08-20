@@ -10,12 +10,77 @@ import {
   categoryKeyFromName,
   parseCatalogMessageForm,
 } from "../lib/admin/message-catalog";
+import {
+  parseComplimentaryOrderCreationResult,
+  parseComplimentaryOrderForm,
+} from "../lib/admin/complimentary-orders";
 import { hasAdminPermission } from "../lib/admin/permissions";
 
 test("phase-one admin authorization permits only explicitly allowed roles", () => {
   assert.equal(hasAdminPermission("super_admin", ["super_admin"]), true);
   assert.equal(hasAdminPermission("support", ["super_admin"]), false);
   assert.equal(hasAdminPermission("content_admin", ["super_admin"]), false);
+});
+
+test("complimentary order form normalizes the friend and validates production input", () => {
+  const form = new FormData();
+  form.set("idempotencyKey", "00000000-0000-4000-8000-000000000001");
+  form.set("purchaserEmail", " Friend@Example.COM ");
+  form.set("purchaserName", " Avery Friend ");
+  form.set("sku", "LUMI-SILVER");
+  form.set("quantity", "2");
+  form.set("internalNote", " Birthday gift ");
+
+  assert.deepEqual(
+    parseComplimentaryOrderForm(form, new Set(["LUMI-SILVER"])),
+    {
+      idempotencyKey: "00000000-0000-4000-8000-000000000001",
+      purchaserEmail: "friend@example.com",
+      purchaserName: "Avery Friend",
+      sku: "LUMI-SILVER",
+      quantity: 2,
+      internalNote: "Birthday gift",
+    }
+  );
+});
+
+test("complimentary order form rejects unknown SKUs and unsafe quantities", () => {
+  const form = new FormData();
+  form.set("idempotencyKey", "00000000-0000-4000-8000-000000000001");
+  form.set("purchaserEmail", "friend@example.com");
+  form.set("sku", "NOT-LUMI");
+  form.set("quantity", "21");
+  assert.throws(
+    () => parseComplimentaryOrderForm(form, new Set(["LUMI-SILVER"])),
+    /eligible Lumi SKU/
+  );
+
+  form.set("sku", "LUMI-SILVER");
+  assert.throws(
+    () => parseComplimentaryOrderForm(form, new Set(["LUMI-SILVER"])),
+    /between 1 and 20/
+  );
+});
+
+test("complimentary order creation result requires idempotency metadata", () => {
+  assert.deepEqual(
+    parseComplimentaryOrderCreationResult({
+      replayed: true,
+      order_id: "00000000-0000-4000-8000-000000000001",
+      factory_reference: "GIFT-000001",
+      production_state: "queued",
+    }),
+    {
+      replayed: true,
+      order_id: "00000000-0000-4000-8000-000000000001",
+      factory_reference: "GIFT-000001",
+      production_state: "queued",
+    }
+  );
+  assert.throws(
+    () => parseComplimentaryOrderCreationResult({ order_id: "missing-fields" }),
+    /invalid response/
+  );
 });
 
 test("message-catalog CSV dry run validates, maps, and identifies duplicates", () => {

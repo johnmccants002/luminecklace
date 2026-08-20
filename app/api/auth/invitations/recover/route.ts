@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requestShopifyInvitationRecovery } from "@/lib/shopify/orders";
+import { requestOrderOwnerInvitationRecovery } from "@/lib/shopify/orders";
 import { isValidEmail } from "@/lib/shopify/webhook";
 
 type RecoveryBody = {
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    await requestShopifyInvitationRecovery(body.email);
+    await requestOrderOwnerInvitationRecovery(body.email);
   } catch (error) {
     // Keep the public response non-enumerating even when the provider is unavailable.
     console.error("Invitation recovery request failed", error);
