@@ -1,7 +1,8 @@
 {
   "appclips": {
     "apps": [
-      "7HTV4A5W6Y.luminecklace.luminecklace.Clip"
+      "7HTV4A5W6Y.luminecklace.luminecklace.Clip",
+      "7HTV4A5W6Y.com.luminecklace.lumiarcade.Clip"
     ]
   },
   "applinks": {
@@ -16,7 +17,14 @@
           },
           {
             "/": "/handoff*"
-          },
+          }
+        ]
+      },
+      {
+        "appIDs": [
+          "7HTV4A5W6Y.com.luminecklace.lumiarcade"
+        ],
+        "components": [
           {
             "/": "/a/*"
           },
