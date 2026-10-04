@@ -1,16 +1,33 @@
 {
+  "appclips": {
+    "apps": [
+      "7HTV4A5W6Y.luminecklace.luminecklace.Clip"
+    ]
+  },
   "applinks": {
     "details": [
       {
-        "appIDs": ["7HTV4A5W6Y.luminecklace.luminecklace"],
+        "appIDs": [
+          "7HTV4A5W6Y.luminecklace.luminecklace"
+        ],
         "components": [
-          { "/": "/clip*" },
-          { "/": "/handoff*" }
+          {
+            "/": "/clip*"
+          },
+          {
+            "/": "/handoff*"
+          },
+          {
+            "/": "/a/*"
+          },
+          {
+            "/": "/g/*"
+          },
+          {
+            "/": "/play"
+          }
         ]
       }
     ]
-  },
-  "appclips": {
-    "apps": ["7HTV4A5W6Y.luminecklace.luminecklace.Clip"]
   }
 }
