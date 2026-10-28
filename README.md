@@ -95,6 +95,49 @@ The response is intentionally non-enumerating. Recovery only sends for an
 unconfirmed Auth user with an eligible queued order (Shopify or complimentary),
 never creates a new user, and has a persisted per-email cooldown.
 
+### Password recovery (existing accounts)
+
+The iOS app and `/auth/reset-password` request `POST /api/auth/password/reset`
+with `{ "email": "buyer@example.com" }`. Valid requests return the same HTTP 202
+response for existing/missing accounts, provider cooldowns, and delivery errors.
+Malformed requests return 400; unexpected transport/configuration failures return
+503 so the app can offer retry. A 202 response does not guarantee email delivery.
+
+Recovery uses the public Supabase Auth API with its configured email cooldown and
+project rate limits; it does not generate admin links or create users. Confirm
+custom SMTP, email cooldowns, and project rate limits in the deployment project.
+Add the exact production `/auth/reset-password` URL to the Auth redirect allowlist.
+The callback origin comes only from `NEXT_PUBLIC_SITE_URL`, never request input.
+
+The default **Reset password** email may continue using `{{ .ConfirmationURL }}`.
+For a custom template, use:
+
+```html
+<a href="{{ .SiteURL }}/auth/reset-password?token_hash={{ .TokenHash }}&type=recovery">
+  Reset your Lumi password
+</a>
+```
+
+Set the Supabase Site URL to the same canonical production origin. Do not point
+password-recovery links at `/auth/set-password` (purchase setup) or
+`/auth/recover/confirm` (invitation recovery).
+
+The dedicated recovery client is in-memory only and uses an implicit email
+handoff so a request started in iOS can finish in another browser without a
+browser-bound PKCE verifier. The recovery page accepts either the default
+recovery fragment or custom recovery token hash, clears credentials from the URL,
+and verifies the resulting user with Supabase before enabling password changes.
+It never falls back to an existing browser login. Invalid/expired links offer a
+new request; successful changes direct the customer back to Lumi to sign in.
+Reloading the page after its credentials are cleared requires a fresh email link.
+
+Run `node --import tsx --test tests/password-recovery.test.ts` for isolated
+contract, validation, callback, and password-update tests (no live emails).
+Before release, use a known test account and inbox to verify delivery, expired
+links, password update, and iOS sign-in. Also verify a test purchase invitation
+attaches its necklace after confirmation. These live checks require the deployed
+routes, Auth settings, and a disposable test environment.
+
 ### Deferred Shopify events
 
 This integration intentionally does not process `orders/cancelled` or

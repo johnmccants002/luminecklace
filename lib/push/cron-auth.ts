@@ -13,4 +13,3 @@ export function isAuthorizedCronRequest(req: Request): boolean {
     timingSafeEqual(expectedBytes, suppliedBytes)
   );
 }
-
