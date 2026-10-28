@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { GET as getCron, isAuthorizedCronRequest } from "../app/api/cron/push/route";
+import { GET as getCron } from "../app/api/cron/push/route";
+import { isAuthorizedCronRequest } from "../lib/push/cron-auth";
 import { PUT as putDevice } from "../app/api/push/devices/route";
 import { buildApnsRequest } from "../lib/push/apns";
 import { dispatchPushDeliveries } from "../lib/push/dispatcher";
